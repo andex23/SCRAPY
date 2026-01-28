@@ -162,7 +162,7 @@ export default function SelectorBuilder({ fields, onSave, initialSelectors = {} 
       <div className="mt-4 p-3 bg-accent/10 rounded">
         <p className="text-xs text-accent/60">
           <strong>Tip:</strong> Use CSS selectors like <code className="bg-hover px-1 rounded">.product-title</code> or <code className="bg-hover px-1 rounded">#price</code>.
-          Add fallback selectors if the first one doesn't work.
+          Add fallback selectors if the first one doesn&apos;t work.
         </p>
       </div>
     </div>

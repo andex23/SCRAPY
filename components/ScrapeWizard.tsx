@@ -100,9 +100,8 @@ export default function ScrapeWizard({ onComplete, onCancel }: ScrapeWizardProps
             {[1, 2, 3, 4, 5].map((s) => (
               <div
                 key={s}
-                className={`flex-1 h-2 rounded ${
-                  s <= step ? 'bg-accent' : 'bg-hover/50'
-                }`}
+                className={`flex-1 h-2 rounded ${s <= step ? 'bg-accent' : 'bg-hover/50'
+                  }`}
               />
             ))}
           </div>
@@ -197,7 +196,7 @@ export default function ScrapeWizard({ onComplete, onCancel }: ScrapeWizardProps
           {step === 4 && (
             <div>
               <p className="text-sm text-accent/60 mb-4">
-                After scraping, you'll be able to preview, filter, and edit the extracted data before exporting.
+                After scraping, you&apos;ll be able to preview, filter, and edit the extracted data before exporting.
               </p>
               <div className="border border-border rounded p-4 bg-hover/30">
                 <p className="text-xs text-accent/50">
@@ -213,7 +212,7 @@ export default function ScrapeWizard({ onComplete, onCancel }: ScrapeWizardProps
           {step === 5 && (
             <div>
               <p className="text-sm text-accent/60 mb-4">
-                Click "complete" to start scraping. You'll be able to preview and export the results.
+                Click &quot;complete&quot; to start scraping. You&apos;ll be able to preview and export the results.
               </p>
             </div>
           )}
