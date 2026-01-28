@@ -1,0 +1,17 @@
+[project]
+name = "scraper-backend"
+version = "1.0.0"
+description = "Industry-grade web scraper backend"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "playwright>=1.48.0",
+    "pydantic>=2.9.2",
+    "pyyaml>=6.0.1",
+    "python-multipart>=0.0.12",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

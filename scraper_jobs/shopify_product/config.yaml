@@ -1,0 +1,39 @@
+name: shopify_product
+description: Scrape products from Shopify store
+url: https://example-store.myshopify.com
+
+modules:
+  - products
+  - images
+
+extractors:
+  products:
+    type: product
+    selectors:
+      json_ld: true
+      fallback:
+        title:
+          - h1.product-title
+          - .product-name
+        price:
+          - .price
+          - [data-price]
+        image:
+          - .product-image img
+          - img.product-photo
+        description:
+          - .description
+          - .product-details
+
+rate_limits:
+  requests_per_second: 2
+  per_domain: true
+
+compliance:
+  robots_txt: true
+  public_only: true
+  enforce: false
+
+output:
+  format: csv
+  shopify_format: false

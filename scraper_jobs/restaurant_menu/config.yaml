@@ -1,0 +1,31 @@
+name: restaurant_menu
+description: Scrape restaurant menu items
+url: https://restaurant.example.com/menu
+
+modules:
+  - products
+  - text
+
+extractors:
+  products:
+    type: product
+    selectors:
+      title:
+        - .menu-item-name
+        - .dish-name
+      price:
+        - .menu-item-price
+        - .price
+      description:
+        - .menu-item-description
+
+rate_limits:
+  requests_per_second: 1
+  per_domain: true
+
+compliance:
+  robots_txt: true
+  public_only: true
+
+output:
+  format: csv
