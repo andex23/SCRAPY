@@ -243,35 +243,65 @@ export default function Home() {
   };
 
   const handleDownloadAllImages = async () => {
-    if (!results.images || results.images.length === 0) return;
+    const imageUrls = results.images?.map((img) => img.url) || [];
+    await downloadMediaZip('/api/download', 'imageUrls', imageUrls, 'scraped-images', 'images');
+  };
+
+  const handleDownloadAllVideos = async () => {
+    const videoUrls = results.videos?.map((video) => video.url) || [];
+    await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos');
+  };
+
+  const handleDownloadVideos = async (videoUrls: string[]) => {
+    await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos');
+  };
+
+  const downloadMediaZip = async (
+    endpoint: string,
+    payloadKey: 'imageUrls' | 'videoUrls',
+    urls: string[],
+    filenamePrefix: string,
+    mediaLabel: string
+  ) => {
+    if (!urls || urls.length === 0) return;
 
     setLoading(true);
     try {
-      const response = await fetch('/api/download', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          imageUrls: results.images.map((img) => img.url),
+          [payloadKey]: urls,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Download failed');
+        let message = 'Download failed';
+        try {
+          const errorData = await response.json();
+          if (errorData?.error) {
+            message = errorData.error;
+          }
+        } catch {
+          // Ignore JSON parse failures and use generic message.
+        }
+        throw new Error(message);
       }
 
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `scraped-images-${Date.now()}.zip`;
+      a.download = `${filenamePrefix}-${Date.now()}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      alert('Failed to download images');
+      const message = err instanceof Error ? err.message : `Failed to download ${mediaLabel}`;
+      alert(message);
       console.error('Download error:', err);
     } finally {
       setLoading(false);
@@ -510,7 +540,33 @@ export default function Home() {
                 {!item.error && (
                   <ResultsSection
                     results={item.result}
-                    onDownloadAllImages={handleDownloadAllImages}
+                    onDownloadAllImages={() =>
+                      downloadMediaZip(
+                        '/api/download',
+                        'imageUrls',
+                        item.result.images?.map((img) => img.url) || [],
+                        'scraped-images',
+                        'images'
+                      )
+                    }
+                    onDownloadAllVideos={() =>
+                      downloadMediaZip(
+                        '/api/download/videos',
+                        'videoUrls',
+                        item.result.videos?.map((video) => video.url) || [],
+                        'scraped-videos',
+                        'videos'
+                      )
+                    }
+                    onDownloadVideos={(videoUrls) =>
+                      downloadMediaZip(
+                        '/api/download/videos',
+                        'videoUrls',
+                        videoUrls,
+                        'scraped-videos',
+                        'videos'
+                      )
+                    }
                   />
                 )}
               </div>
@@ -567,7 +623,12 @@ export default function Home() {
 
             {/* Standard Results View */}
             {!showPreview && (
-              <ResultsSection results={results} onDownloadAllImages={handleDownloadAllImages} />
+              <ResultsSection
+                results={results}
+                onDownloadAllImages={handleDownloadAllImages}
+                onDownloadAllVideos={handleDownloadAllVideos}
+                onDownloadVideos={handleDownloadVideos}
+              />
             )}
           </div>
         )}

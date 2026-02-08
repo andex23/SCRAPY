@@ -1,13 +1,110 @@
 import { chromium } from 'playwright';
-import { ScrapeResult, AuthConfig } from '@/types';
+import { ScrapeResult, AuthConfig, VideoData } from '@/types';
 import { resolveUrl, deduplicateImages, filterImages, upgradeToHighQuality } from './utils';
 import { extractImages } from './modules/images';
 import { extractProducts } from './modules/products';
 import { extractContacts } from './modules/contacts';
 import { extractAssets } from './modules/assets';
+import { extractVideos } from './modules/videos';
 import { extractLinks, extractLinksRecursive } from './modules/crawl';
 import { extractText } from './modules/text';
 import { extractScreenshot } from './modules/screenshot';
+
+const DIRECT_VIDEO_PATTERN = /\.(mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)(\?|#|$)/i;
+
+function decodeEmbeddedUrl(value: string): string {
+  return value
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/g, '&')
+    .replace(/&amp;/g, '&');
+}
+
+function collectMediaUrlsFromHtml(html: string): string[] {
+  const matches: string[] = [];
+  const patterns = [
+    /"mp4URL"\s*:\s*"([^"]+)"/gi,
+    /"m3u8URL"\s*:\s*"([^"]+)"/gi,
+    /"contentUrl"\s*:\s*"([^"]+\.(?:mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)[^"]*)"/gi,
+    /<source[^>]+src=["']([^"']+)["']/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(html)) !== null) {
+      const raw = match[1];
+      if (!raw) continue;
+      const decoded = decodeEmbeddedUrl(raw.trim());
+      if (decoded) matches.push(decoded);
+    }
+  }
+
+  return matches;
+}
+
+async function enrichVideoEntries(videos: VideoData[], pageUrl: string): Promise<VideoData[]> {
+  if (!videos || videos.length === 0) return videos;
+
+  const enriched: VideoData[] = [...videos];
+  const seen = new Set(videos.map((video) => video.url));
+
+  for (const video of videos) {
+    // Only expand embedded/player pages; direct media URLs are already usable.
+    if (!video.url || DIRECT_VIDEO_PATTERN.test(video.url)) continue;
+    if (!video.isEmbedded && !(video.provider === 'youtube' || video.provider === 'vimeo' || video.provider === 'dailymotion')) {
+      continue;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const response = await fetch(video.url, {
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Referer': pageUrl,
+        },
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) continue;
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
+        continue;
+      }
+
+      const html = await response.text();
+      const mediaUrls = collectMediaUrlsFromHtml(html);
+
+      for (const mediaUrl of mediaUrls) {
+        const absoluteMediaUrl = resolveUrl(mediaUrl, video.url);
+        if (!DIRECT_VIDEO_PATTERN.test(absoluteMediaUrl)) continue;
+        if (seen.has(absoluteMediaUrl)) continue;
+        seen.add(absoluteMediaUrl);
+
+        enriched.push({
+          url: absoluteMediaUrl,
+          title: video.title,
+          poster: video.poster,
+          width: video.width,
+          height: video.height,
+          provider: video.provider,
+          mimeType: absoluteMediaUrl.includes('.m3u8')
+            ? 'application/vnd.apple.mpegurl'
+            : absoluteMediaUrl.includes('.mpd')
+              ? 'application/dash+xml'
+              : undefined,
+          isEmbedded: false,
+        });
+      }
+    } catch {
+      // Ignore failed expansion and keep base extracted URL.
+    }
+  }
+
+  return enriched;
+}
 
 export async function scrapeWithModules(
   url: string,
@@ -299,6 +396,29 @@ export async function scrapeWithModules(
             }));
             const filteredImages = filterImages(resolvedImages);
             result.images = deduplicateImages(filteredImages);
+            break;
+
+          case 'videos':
+            // Scroll page to trigger lazy loading for dynamic/embedded video blocks
+            await ensureLazyContentLoaded();
+            const rawVideos = await extractVideos(page);
+            const seenVideos = new Set<string>();
+            const normalizedVideos = rawVideos
+              .map((video) => ({
+                ...video,
+                url: resolveUrl(video.url, url),
+                poster: video.poster ? resolveUrl(video.poster, url) : undefined,
+              }))
+              .filter((video) => {
+                if (!video.url || seenVideos.has(video.url)) return false;
+                seenVideos.add(video.url);
+                return true;
+              });
+            result.videos = (await enrichVideoEntries(normalizedVideos, url)).sort((a, b) => {
+              const aEmbedded = a.isEmbedded ? 1 : 0;
+              const bEmbedded = b.isEmbedded ? 1 : 0;
+              return aEmbedded - bEmbedded;
+            });
             break;
 
           case 'products':

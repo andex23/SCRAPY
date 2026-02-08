@@ -62,6 +62,10 @@ def test_scrape(url: str, modules: List[str]) -> None:
         # Images
         if "images" in results:
             print(f"🖼️  Images: {len(results['images'])}")
+
+        # Videos
+        if "videos" in results:
+            print(f"🎬 Videos: {len(results['videos'])}")
         
         # Contacts
         if "contacts" in results:

@@ -69,6 +69,11 @@ async function testScrape() {
       console.log(`🖼️  Images: ${results.images.length}`);
     }
 
+    // Videos
+    if (results.videos) {
+      console.log(`🎬 Videos: ${results.videos.length}`);
+    }
+
     // Contacts
     if (results.contacts) {
       const { emails, phones, socials } = results.contacts;

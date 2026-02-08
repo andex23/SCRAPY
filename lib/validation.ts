@@ -6,6 +6,7 @@ export interface ValidationResult {
   errors: string[];
   stats: {
     images: number;
+    videos: number;
     products: number;
     contacts: { emails: number; phones: number; socials: number };
     assets: number;
@@ -21,6 +22,7 @@ export function validateScrapeResult(result: ScrapeResult): ValidationResult {
     errors: [],
     stats: {
       images: 0,
+      videos: 0,
       products: 0,
       contacts: { emails: 0, phones: 0, socials: 0 },
       assets: 0,
@@ -46,6 +48,17 @@ export function validateScrapeResult(result: ScrapeResult): ValidationResult {
     const incompleteProducts = result.products.filter((p) => !p.title);
     if (incompleteProducts.length > 0) {
       validation.warnings.push(`${incompleteProducts.length} products missing titles`);
+    }
+  }
+
+  // Validate videos
+  if (result.videos) {
+    validation.stats.videos = result.videos.length;
+    const invalidVideos = result.videos.filter(
+      (video) => !video.url || !video.url.startsWith('http')
+    );
+    if (invalidVideos.length > 0) {
+      validation.warnings.push(`${invalidVideos.length} videos have invalid URLs`);
     }
   }
 

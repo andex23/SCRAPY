@@ -98,6 +98,9 @@ export default function DataPreviewPanel({ results, onExport }: DataPreviewPanel
     if (firstItem.type === 'image') {
       return ['url', 'alt', 'width', 'height'];
     }
+    if (firstItem.type === 'video') {
+      return ['url', 'title', 'provider', 'durationSeconds', 'mimeType', 'width', 'height', 'poster'];
+    }
     if (firstItem.type === 'contact') {
       return ['type', 'value'];
     }

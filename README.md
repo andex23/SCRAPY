@@ -1,16 +1,18 @@
 # Scrape Anything
 
-A modular web scraping dashboard that extracts images, text, products, contacts, assets, and crawls pages — all with a retro-terminal aesthetic.
+A modular web scraping dashboard that extracts images, videos, text, products, contacts, assets, screenshots, and crawls pages.
 
 ## Features
 
-- 🔍 **Modular Extraction**: Choose what to scrape with 6 modules
+- 🔍 **Modular Extraction**: Choose what to scrape with 8 modules
   - **Images**: High-quality images from `<img>`, CSS backgrounds, srcset
+  - **Videos**: Native `<video>`, embedded players, and direct video links
   - **Text**: Clean readable content (title, meta, headings, paragraphs)
   - **Products**: JSON-LD structured data + DOM fallback
   - **Contacts**: Emails, phone numbers, social media links
   - **Assets**: PDFs, ZIPs, videos, documents
   - **Crawl**: Internal links for site mapping
+  - **Screenshot**: Full page and viewport captures
 
 - 🎨 **Retro-Terminal Aesthetic**: Minimal milk-colored design with IBM Plex Mono
 - 📦 **Batch Downloads**: ZIP all images or export JSON results
@@ -69,11 +71,13 @@ npm start
 1. **Enter URL**: Type any website URL in the input field
 2. **Select Modules**: Check which data you want to extract
    - ✓ images
+   - ☐ videos
    - ☐ text
    - ☐ products
    - ☐ contacts
    - ☐ assets
    - ☐ crawl
+   - ☐ screenshot
 3. **Click "scrape"**: Wait for extraction to complete
 4. **View Results**: Data displayed in organized sections
 5. **Export**: Download all images as ZIP or export JSON
@@ -86,6 +90,12 @@ npm start
 - Upgrades CDN URLs to max quality (Squarespace, Shopify, Cloudinary, etc.)
 - Filters out tracking pixels (<20x20px)
 - Limit: 100 images per scrape
+
+### Videos Module
+- Extracts from `<video>` tags, `<source>` children, JSON-LD `VideoObject`, and common embeds
+- Detects providers (YouTube, Vimeo, Dailymotion, Wistia, Loom)
+- Captures metadata when available: title, poster, duration, dimensions, mime type
+- Limit: 100 videos per scrape
 
 ### Text Module
 - Removes non-content elements (nav, header, footer, scripts)
@@ -149,6 +159,7 @@ npm start
   /scraper.ts                  # Module orchestration
   /modules
     /images.ts                 # Image extraction
+    /videos.ts                 # Video extraction
     /text.ts                   # Text content extraction
     /products.ts               # Product extraction
     /contacts.ts               # Contact extraction
@@ -165,7 +176,7 @@ npm start
 - 45-second timeout with fallback loading strategies
 - Networkidle → domcontentloaded → load
 - Graceful degradation if modules fail
-- Rate limits: 100 images, 50 headings/products/assets/links, 100 paragraphs, 20 contacts
+- Rate limits: 100 images/videos, 50 headings/products/assets/links, 100 paragraphs, 20 contacts
 - No recursive crawling (depth 1 only)
 
 ## Testing Suggestions
@@ -182,7 +193,6 @@ npm start
 
 - AI-powered text summarization (GPT/LangChain integration)
 - Keyword extraction and auto-tagging
-- Screenshot capture module
 - CSV/Google Sheets export
 - Bulk URL scraping
 - Rate limiting system

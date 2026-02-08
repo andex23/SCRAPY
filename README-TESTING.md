@@ -5,6 +5,8 @@
 ### Node.js Test Script
 ```bash
 npm run test-scrape "https://www2.hm.com/en_us/men/sale/view-all.html" products images
+# Video scraping example:
+npm run test-scrape "https://example.com" videos
 ```
 
 Or directly:

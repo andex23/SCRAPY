@@ -243,7 +243,9 @@ export default function ProductPreviewTable({ products, onUpdate, onExport }: Pr
 
       {showImageModal && (
         <ImageModal
-          imageUrl={showImageModal}
+          image={{ url: showImageModal }}
+          currentIndex={0}
+          totalImages={1}
           onClose={() => setShowImageModal(null)}
         />
       )}

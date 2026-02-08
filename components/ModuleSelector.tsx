@@ -8,6 +8,7 @@ interface ModuleSelectorProps {
 
 const MODULES = [
   { id: 'images', label: 'images' },
+  { id: 'videos', label: 'videos' },
   { id: 'text', label: 'text' },
   { id: 'products', label: 'products' },
   { id: 'contacts', label: 'contacts' },
@@ -49,4 +50,3 @@ export default function ModuleSelector({ selected, onChange, disabled }: ModuleS
     </div>
   );
 }
-

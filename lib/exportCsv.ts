@@ -75,6 +75,25 @@ export function downloadCsv(data: ScrapeResult, filename?: string) {
     });
   }
 
+  // Videos CSV
+  if (data.videos && data.videos.length > 0) {
+    rows.push([]);
+    rows.push(['=== VIDEOS ===']);
+    rows.push(['URL', 'Title', 'Provider', 'Duration (seconds)', 'Mime Type', 'Width', 'Height', 'Poster URL']);
+    data.videos.forEach((video) => {
+      rows.push([
+        video.url || '',
+        video.title || '',
+        video.provider || '',
+        video.durationSeconds?.toString() || '',
+        video.mimeType || '',
+        video.width?.toString() || '',
+        video.height?.toString() || '',
+        video.poster || '',
+      ]);
+    });
+  }
+
   // Convert to CSV string
   const csvContent = rows
     .map((row) =>

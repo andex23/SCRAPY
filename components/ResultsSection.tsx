@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { ScrapeResult, ProductData, ImageData } from '@/types';
-import ImageGrid from './ImageGrid';
+import { ScrapeResult } from '@/types';
 import { downloadJson } from '@/lib/exportJson';
 import { downloadCsv } from '@/lib/exportCsv';
 import FilterPanel from './FilterPanel';
@@ -11,12 +10,20 @@ import ValidationPanel from './ValidationPanel';
 interface ResultsSectionProps {
   results: ScrapeResult;
   onDownloadAllImages?: () => void;
+  onDownloadAllVideos?: () => void;
+  onDownloadVideos?: (videoUrls: string[]) => void | Promise<void>;
 }
 
-export default function ResultsSection({ results, onDownloadAllImages }: ResultsSectionProps) {
+export default function ResultsSection({
+  results,
+  onDownloadAllImages,
+  onDownloadAllVideos,
+  onDownloadVideos,
+}: ResultsSectionProps) {
   const [filteredResults, setFilteredResults] = useState<ScrapeResult>(results);
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
   const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set());
+  const [selectedVideos, setSelectedVideos] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<string>('all');
 
   const hasResults = Object.keys(results).some(key => {
@@ -28,6 +35,7 @@ export default function ResultsSection({ results, onDownloadAllImages }: Results
   const availableTabs = useMemo(() => {
     const tabs = ['all'];
     if (results.images && results.images.length > 0) tabs.push('images');
+    if (results.videos && results.videos.length > 0) tabs.push('videos');
     if (results.products && results.products.length > 0) tabs.push('products');
     if (results.contacts && (results.contacts.emails.length > 0 || results.contacts.phones.length > 0 || results.contacts.socials.length > 0)) tabs.push('contacts');
     if (results.assets && results.assets.length > 0) tabs.push('assets');
@@ -88,6 +96,27 @@ export default function ResultsSection({ results, onDownloadAllImages }: Results
     setSelectedImages(new Set());
   };
 
+  // Video selection handlers
+  const toggleVideoSelection = (index: number) => {
+    const newSelected = new Set(selectedVideos);
+    if (newSelected.has(index)) {
+      newSelected.delete(index);
+    } else {
+      newSelected.add(index);
+    }
+    setSelectedVideos(newSelected);
+  };
+
+  const selectAllVideos = () => {
+    if (displayResults.videos) {
+      setSelectedVideos(new Set(displayResults.videos.map((_, i) => i)));
+    }
+  };
+
+  const deselectAllVideos = () => {
+    setSelectedVideos(new Set());
+  };
+
   // Export selected items
   const exportSelectedProducts = () => {
     if (displayResults.products) {
@@ -103,8 +132,77 @@ export default function ResultsSection({ results, onDownloadAllImages }: Results
     }
   };
 
+  const exportSelectedVideos = () => {
+    if (displayResults.videos) {
+      const selected = displayResults.videos.filter((_, i) => selectedVideos.has(i));
+      downloadJson({ videos: selected });
+    }
+  };
+
+  const getSelectedVideoUrls = () =>
+    displayResults.videos
+      ? displayResults.videos
+          .filter((_, i) => selectedVideos.has(i))
+          .map((video) => video.url)
+      : [];
+
+  const downloadSelectedVideos = () => {
+    const urls = getSelectedVideoUrls();
+    if (urls.length === 0) return;
+    if (onDownloadVideos) {
+      onDownloadVideos(urls);
+      return;
+    }
+    if (onDownloadAllVideos && displayResults.videos && urls.length === displayResults.videos.length) {
+      onDownloadAllVideos();
+    }
+  };
+
+  const downloadSingleVideo = (url: string) => {
+    if (onDownloadVideos) {
+      onDownloadVideos([url]);
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const shouldShowSection = (section: string) => {
     return activeTab === 'all' || activeTab === section;
+  };
+
+  const isDirectVideoFile = (url: string) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url);
+
+  const toEmbedUrl = (url: string): string => {
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+
+      if (host.includes('youtube.com')) {
+        if (parsed.pathname.includes('/embed/')) return url;
+        const videoId = parsed.searchParams.get('v');
+        if (videoId) return `https://www.youtube.com/embed/${videoId}`;
+      }
+
+      if (host.includes('youtu.be')) {
+        const videoId = parsed.pathname.split('/').filter(Boolean)[0];
+        if (videoId) return `https://www.youtube.com/embed/${videoId}`;
+      }
+
+      if (host.includes('vimeo.com')) {
+        if (host.includes('player.vimeo.com')) return url;
+        const videoId = parsed.pathname.split('/').filter(Boolean)[0];
+        if (videoId && /^\d+$/.test(videoId)) return `https://player.vimeo.com/video/${videoId}`;
+      }
+
+      if (host.includes('dailymotion.com') && !parsed.pathname.includes('/embed/')) {
+        const match = parsed.pathname.match(/\/video\/([^_/]+)/);
+        if (match?.[1]) return `https://www.dailymotion.com/embed/video/${match[1]}`;
+      }
+
+      return url;
+    } catch {
+      return url;
+    }
   };
 
   return (
@@ -117,6 +215,13 @@ export default function ResultsSection({ results, onDownloadAllImages }: Results
               <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
               <span className="text-accent/70">Images:</span>
               <span className="font-medium">{displayResults.images.length}</span>
+            </div>
+          )}
+          {displayResults.videos && displayResults.videos.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+              <span className="text-accent/70">Videos:</span>
+              <span className="font-medium">{displayResults.videos.length}</span>
             </div>
           )}
           {displayResults.products && displayResults.products.length > 0 && (
@@ -400,6 +505,156 @@ export default function ResultsSection({ results, onDownloadAllImages }: Results
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* Videos Section */}
+      {displayResults.videos && displayResults.videos.length > 0 && shouldShowSection('videos') && (
+        <section className="bg-background border border-border rounded-lg overflow-hidden">
+          <div className="bg-gradient-to-r from-red-500/10 to-transparent px-6 py-4 border-b border-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="w-3 h-3 bg-red-500 rounded-full"></span>
+                <h3 className="text-lg font-medium">Videos</h3>
+                <span className="text-sm text-accent/50">({displayResults.videos.length} items)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-accent/50">
+                  {selectedVideos.size} selected
+                </span>
+                <button
+                  onClick={selectAllVideos}
+                  className="px-3 py-1.5 text-xs bg-hover hover:bg-accent/20 rounded-lg transition-colors"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={deselectAllVideos}
+                  className="px-3 py-1.5 text-xs bg-hover hover:bg-accent/20 rounded-lg transition-colors"
+                >
+                  Deselect All
+                </button>
+                {selectedVideos.size > 0 && (
+                  <button
+                    onClick={exportSelectedVideos}
+                    className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg transition-colors"
+                  >
+                    Export Metadata
+                  </button>
+                )}
+                {selectedVideos.size > 0 && (
+                  <button
+                    onClick={downloadSelectedVideos}
+                    className="px-3 py-1.5 text-xs bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors"
+                  >
+                    Download Selected
+                  </button>
+                )}
+                <button
+                  onClick={onDownloadAllVideos}
+                  className="px-3 py-1.5 text-xs bg-red-700 text-white hover:bg-red-800 rounded-lg transition-colors"
+                >
+                  Download All
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 py-2 border-b border-border text-xs text-accent/60">
+            Download saves media files (mp4/m3u8/mpd/webm/mov). Export saves metadata JSON.
+          </div>
+
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {displayResults.videos.map((video, idx) => {
+              const embedUrl = toEmbedUrl(video.url);
+              const canRenderDirectVideo = isDirectVideoFile(video.url);
+              const canRenderEmbed =
+                embedUrl.includes('/embed/') || embedUrl.includes('player.vimeo.com/video/');
+
+              return (
+                <div
+                  key={idx}
+                  className={`border rounded-lg overflow-hidden transition-all ${
+                    selectedVideos.has(idx)
+                      ? 'border-red-500 ring-2 ring-red-500/20'
+                      : 'border-border hover:border-accent/30'
+                  }`}
+                >
+                  <div
+                    className="cursor-pointer"
+                    onClick={() => toggleVideoSelection(idx)}
+                  >
+                    {canRenderDirectVideo ? (
+                      <video
+                        src={video.url}
+                        poster={video.poster}
+                        controls
+                        preload="metadata"
+                        className="w-full aspect-video bg-black"
+                      />
+                    ) : canRenderEmbed ? (
+                      <iframe
+                        src={embedUrl}
+                        title={video.title || `video-${idx + 1}`}
+                        className="w-full aspect-video bg-black"
+                        loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    ) : (
+                      <div className="w-full aspect-video bg-hover/40 flex items-center justify-center text-sm text-accent/60">
+                        Preview unavailable
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="text-sm font-medium truncate">
+                        {video.title || `Video ${idx + 1}`}
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => downloadSingleVideo(video.url)}
+                          className="px-2 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors"
+                        >
+                          Download
+                        </button>
+                        <input
+                          type="checkbox"
+                          checked={selectedVideos.has(idx)}
+                          onChange={() => toggleVideoSelection(idx)}
+                          className="w-4 h-4 rounded border-border bg-background accent-red-500 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    <a
+                      href={video.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-red-400 hover:text-red-300 break-all line-clamp-2"
+                    >
+                      {video.url}
+                    </a>
+
+                    <div className="flex flex-wrap gap-2 text-xs text-accent/60">
+                      {video.provider && (
+                        <span className="px-2 py-0.5 bg-hover/50 rounded uppercase">{video.provider}</span>
+                      )}
+                      {video.durationSeconds && (
+                        <span>{Math.round(video.durationSeconds)}s</span>
+                      )}
+                      {video.mimeType && <span>{video.mimeType}</span>}
+                      {video.width && video.height && (
+                        <span>{video.width}×{video.height}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

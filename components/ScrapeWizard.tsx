@@ -78,6 +78,15 @@ export default function ScrapeWizard({ onComplete, onCancel }: ScrapeWizardProps
     }
   };
 
+  const normalizedTemplateSelectors = selectedTemplate?.defaultSelectors
+    ? Object.fromEntries(
+        Object.entries(selectedTemplate.defaultSelectors).map(([field, value]) => [
+          field,
+          Array.isArray(value) ? value : [value],
+        ])
+      )
+    : undefined;
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-background border border-border rounded p-6 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -186,7 +195,7 @@ export default function ScrapeWizard({ onComplete, onCancel }: ScrapeWizardProps
                   <SelectorBuilder
                     fields={Object.keys(selectedTemplate.defaultSelectors)}
                     onSave={setCustomSelectors}
-                    initialSelectors={selectedTemplate.defaultSelectors}
+                    initialSelectors={normalizedTemplateSelectors}
                   />
                 </div>
               )}

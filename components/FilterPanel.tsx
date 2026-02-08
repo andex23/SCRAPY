@@ -118,6 +118,7 @@ export default function FilterPanel({ results, onFiltered }: FilterPanelProps) {
     // Copy other data
     if (results.contacts) filtered.contacts = results.contacts;
     if (results.assets) filtered.assets = results.assets;
+    if (results.videos) filtered.videos = results.videos;
     if (results.crawl) filtered.crawl = results.crawl;
     if (results.screenshot) filtered.screenshot = results.screenshot;
 

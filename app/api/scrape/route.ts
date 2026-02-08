@@ -9,6 +9,11 @@ const ENABLE_PYTHON_BACKEND = process.env.ENABLE_PYTHON_BACKEND === 'true';
 // Determine if request should use Python backend
 function shouldUsePythonBackend(body: any): boolean {
   if (!ENABLE_PYTHON_BACKEND) return false;
+
+  // Keep video extraction on TypeScript path until backend parity is added
+  if (Array.isArray(body.modules) && body.modules.includes('videos')) {
+    return false;
+  }
   
   // Use Python for bulk URLs
   if (body.bulkUrls && Array.isArray(body.bulkUrls) && body.bulkUrls.length > 1) {

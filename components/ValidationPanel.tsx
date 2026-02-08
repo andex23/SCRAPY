@@ -58,6 +58,7 @@ export default function ValidationPanel({ results, onExport }: ValidationPanelPr
             <h5 className="text-xs text-accent/50 mb-2">statistics</h5>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div>Images: {val.stats.images}</div>
+              <div>Videos: {val.stats.videos}</div>
               <div>Products: {val.stats.products}</div>
               <div>Assets: {val.stats.assets}</div>
               <div>Crawl URLs: {val.stats.crawl}</div>

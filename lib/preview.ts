@@ -1,10 +1,10 @@
-import { ScrapeResult, ProductData, ImageData } from '@/types';
+import { ScrapeResult, ProductData, ImageData, VideoData } from '@/types';
 
 export interface PreviewData {
   id: string;
   selected: boolean;
   data: any;
-  type: 'product' | 'image' | 'contact' | 'asset' | 'text' | 'crawl';
+  type: 'product' | 'image' | 'video' | 'contact' | 'asset' | 'text' | 'crawl';
 }
 
 export function preparePreviewData(results: ScrapeResult): PreviewData[] {
@@ -30,6 +30,18 @@ export function preparePreviewData(results: ScrapeResult): PreviewData[] {
         selected: true,
         data: image,
         type: 'image',
+      });
+    });
+  }
+
+  // Videos
+  if (results.videos) {
+    results.videos.forEach((video, idx) => {
+      preview.push({
+        id: `video-${idx}`,
+        selected: true,
+        data: video,
+        type: 'video',
       });
     });
   }
@@ -143,6 +155,17 @@ export function filterPreviewData(
       }
     }
 
+    if (item.type === 'video') {
+      const video = item.data as VideoData;
+      if (filters.keyword) {
+        const keyword = filters.keyword.toLowerCase();
+        const url = (video.url || '').toLowerCase();
+        const title = (video.title || '').toLowerCase();
+        const provider = (video.provider || '').toLowerCase();
+        if (!url.includes(keyword) && !title.includes(keyword) && !provider.includes(keyword)) return false;
+      }
+    }
+
     return true;
   });
 }
@@ -161,6 +184,11 @@ export function exportPreviewData(preview: PreviewData[]): ScrapeResult {
     .filter(p => p.type === 'image')
     .map(p => p.data as ImageData);
   if (images.length > 0) result.images = images;
+
+  const videos = selected
+    .filter(p => p.type === 'video')
+    .map(p => p.data as VideoData);
+  if (videos.length > 0) result.videos = videos;
 
   const contacts = {
     emails: [] as string[],

@@ -5,6 +5,18 @@ export interface ImageData {
   height?: number;
 }
 
+export interface VideoData {
+  url: string;
+  title?: string;
+  poster?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  provider?: string;
+  mimeType?: string;
+  isEmbedded?: boolean;
+}
+
 export interface ProductData {
   title: string;
   price?: string;
@@ -56,6 +68,7 @@ export interface AuthConfig {
 
 export interface ScrapeResult {
   images?: ImageData[];
+  videos?: VideoData[];
   products?: ProductData[];
   contacts?: ContactData;
   assets?: AssetData[];
