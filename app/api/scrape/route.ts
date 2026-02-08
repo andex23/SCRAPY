@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { scrapeWithModules } from '@/lib/scraper';
 import { AuthConfig } from '@/types';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 // Python backend configuration
 const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://localhost:8000';
 const ENABLE_PYTHON_BACKEND = process.env.ENABLE_PYTHON_BACKEND === 'true';

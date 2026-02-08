@@ -11,6 +11,18 @@ import { extractText } from './modules/text';
 import { extractScreenshot } from './modules/screenshot';
 
 const DIRECT_VIDEO_PATTERN = /\.(mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)(\?|#|$)/i;
+const DEFAULT_CHROMIUM_ARGS = [
+  '--disable-blink-features=AutomationControlled',
+  '--disable-features=IsolateOrigins,site-per-process',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-accelerated-2d-canvas',
+  '--no-first-run',
+  '--no-zygote',
+  '--disable-gpu',
+  '--window-size=1920,1080',
+];
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -35,6 +47,41 @@ function normalizeScraperRuntimeError(error: unknown): Error {
   }
 
   return error instanceof Error ? error : new Error(message);
+}
+
+async function launchScraperBrowser() {
+  try {
+    return await chromium.launch({
+      headless: true,
+      args: DEFAULT_CHROMIUM_ARGS,
+    });
+  } catch (launchError) {
+    const launchMessage = toErrorMessage(launchError);
+    const looksLikeMissingExecutable =
+      /Executable doesn't exist at/i.test(launchMessage) ||
+      /Please run the following command to download new browsers/i.test(launchMessage);
+
+    if (!looksLikeMissingExecutable) {
+      throw normalizeScraperRuntimeError(launchError);
+    }
+
+    try {
+      // Fallback for Vercel/serverless runtimes where Playwright browser binaries
+      // are not present in the default cache path.
+      const chromiumPackage = await import('@sparticuz/chromium');
+      const lambdaChromium = chromiumPackage.default;
+      const executablePath = await lambdaChromium.executablePath();
+      const lambdaArgs = Array.isArray(lambdaChromium.args) ? lambdaChromium.args : [];
+
+      return await chromium.launch({
+        headless: true,
+        executablePath,
+        args: [...new Set([...lambdaArgs, ...DEFAULT_CHROMIUM_ARGS])],
+      });
+    } catch (fallbackError) {
+      throw normalizeScraperRuntimeError(fallbackError);
+    }
+  }
 }
 
 function decodeEmbeddedUrl(value: string): string {
@@ -140,26 +187,8 @@ export async function scrapeWithModules(
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
   try {
-    // Launch browser with stealth settings to avoid bot detection
-    try {
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--disable-features=IsolateOrigins,site-per-process',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--window-size=1920,1080',
-        ],
-      });
-    } catch (launchError) {
-      throw normalizeScraperRuntimeError(launchError);
-    }
+    // Launch browser with Vercel-safe fallback.
+    browser = await launchScraperBrowser();
 
     // Enhanced browser context to avoid geo-blocks and bot detection
     const contextOptions: any = {
