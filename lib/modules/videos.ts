@@ -17,7 +17,7 @@ function inferProvider(url: string): string | undefined {
 export async function extractVideos(page: Page): Promise<VideoData[]> {
   const videos = await page.evaluate(() => {
     const videoFilePattern = /\.(mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)(\?|#|$)/i;
-    const videoTokens = new Set(['video', 'videos', 'watch', 'embed', 'player', 'stream', 'ccv']);
+    const embedPathPattern = /\/(?:embed|player|video)\//i;
 
     const results: Array<{
       url: string;
@@ -46,27 +46,16 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
     };
 
     const normalizeUrl = (value: string) => value.trim();
-    const hasStrongVideoPathToken = (value: string): boolean => {
+    const looksLikeEmbedPlayer = (value: string): boolean => {
       try {
         const parsed = new URL(value, window.location.href);
-        const segments = parsed.pathname
-          .toLowerCase()
-          .split('/')
-          .filter(Boolean);
-        return segments.some((segment) => videoTokens.has(segment));
+        const combined = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
+        if (embedPathPattern.test(combined)) return true;
+        return false;
       } catch {
         return false;
       }
     };
-
-    const hasVideoQueryToken = (value: string): boolean =>
-      /[?&](video|v|embed|player|stream|media)=/i.test(value);
-
-    const isLikelyVideoUrl = (value: string) =>
-      videoFilePattern.test(value) ||
-      !!inferProvider(value) ||
-      hasStrongVideoPathToken(value) ||
-      hasVideoQueryToken(value);
 
     const parseDurationToSeconds = (value: string | undefined): number | undefined => {
       if (!value) return undefined;
@@ -100,7 +89,14 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
         return;
       }
 
-      if (!isLikelyVideoUrl(raw) && !data.isEmbedded && !data.mimeType?.toLowerCase().includes('video')) {
+      const provider = data.provider || inferProvider(raw);
+      const mime = (data.mimeType || '').toLowerCase();
+      const hasVideoMime =
+        mime.includes('video') || mime.includes('mpegurl') || mime.includes('dash+xml');
+      const isDirectVideoFile = videoFilePattern.test(raw);
+      const isLikelyEmbeddedPlayer = !!data.isEmbedded && looksLikeEmbedPlayer(raw);
+
+      if (!isDirectVideoFile && !provider && !hasVideoMime && !isLikelyEmbeddedPlayer) {
         return;
       }
 
@@ -112,7 +108,7 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
         durationSeconds: data.durationSeconds,
         width: data.width,
         height: data.height,
-        provider: data.provider || inferProvider(raw),
+        provider,
         mimeType: data.mimeType,
         isEmbedded: data.isEmbedded,
       });
@@ -167,7 +163,7 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
       const src = frame.getAttribute('src') || frame.getAttribute('data-src');
       if (!src) return;
       const provider = inferProvider(src);
-      const looksLikeEmbed = !!provider || isLikelyVideoUrl(src);
+      const looksLikeEmbed = !!provider || looksLikeEmbedPlayer(src);
       if (!looksLikeEmbed) return;
       addVideo({
         url: src,
@@ -208,39 +204,35 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
       if (!href) return;
       const lowered = href.toLowerCase();
       const provider = inferProvider(href);
-      const hasVideoPathToken = hasStrongVideoPathToken(href);
-      const hasVideoQueryParam = hasVideoQueryToken(lowered);
-      const isVideoAnchor =
-        videoFilePattern.test(lowered) ||
-        !!provider ||
-        hasVideoPathToken ||
-        hasVideoQueryParam;
+      const isVideoAnchor = videoFilePattern.test(lowered) || !!provider;
       if (!isVideoAnchor) return;
 
       addVideo({
         url: href,
         title: (link.textContent || '').trim() || titleFromElement(link),
         provider,
-        isEmbedded: !!provider || !videoFilePattern.test(lowered),
+        isEmbedded: !!provider && !videoFilePattern.test(lowered),
       });
     });
 
     // Data attributes used by JS players.
     document
       .querySelectorAll(
-        '[data-video], [data-video-url], [data-src], [data-hls], [data-m3u8], [data-mpd], [data-playlist], [data-url]'
+        '[data-video], [data-video-url], [data-hls], [data-m3u8], [data-mpd], [data-playlist], video[data-src], source[data-src], iframe[data-src], embed[data-src]'
       )
       .forEach((el) => {
+        const isMediaElement = el.matches('video, source, iframe, embed');
         const candidates = [
           el.getAttribute('data-video'),
           el.getAttribute('data-video-url'),
-          el.getAttribute('data-src'),
           el.getAttribute('data-hls'),
           el.getAttribute('data-m3u8'),
           el.getAttribute('data-mpd'),
           el.getAttribute('data-playlist'),
-          el.getAttribute('data-url'),
         ];
+        if (isMediaElement) {
+          candidates.push(el.getAttribute('data-src'));
+        }
         for (const candidate of candidates) {
           addVideo({
             url: candidate,

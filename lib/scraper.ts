@@ -12,6 +12,31 @@ import { extractScreenshot } from './modules/screenshot';
 
 const DIRECT_VIDEO_PATTERN = /\.(mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)(\?|#|$)/i;
 
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return String(error);
+}
+
+function normalizeScraperRuntimeError(error: unknown): Error {
+  const message = toErrorMessage(error);
+
+  if (
+    /Executable doesn't exist at/i.test(message) ||
+    /Please run the following command to download new browsers/i.test(message)
+  ) {
+    return new Error(
+      'SCRAPER_BROWSER_MISSING: Playwright browser executable is missing on this server runtime.'
+    );
+  }
+
+  if (/browserType\.launch/i.test(message)) {
+    return new Error(`SCRAPER_BROWSER_LAUNCH_FAILED: ${message}`);
+  }
+
+  return error instanceof Error ? error : new Error(message);
+}
+
 function decodeEmbeddedUrl(value: string): string {
   return value
     .replace(/\\\//g, '/')
@@ -112,24 +137,30 @@ export async function scrapeWithModules(
   authConfig?: AuthConfig,
   crawlDepth?: number
 ): Promise<ScrapeResult> {
-  // Launch browser with stealth settings to avoid bot detection
-  const browser = await chromium.launch({
-    headless: true,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-gpu',
-      '--window-size=1920,1080',
-    ],
-  });
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
   try {
+    // Launch browser with stealth settings to avoid bot detection
+    try {
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--window-size=1920,1080',
+        ],
+      });
+    } catch (launchError) {
+      throw normalizeScraperRuntimeError(launchError);
+    }
+
     // Enhanced browser context to avoid geo-blocks and bot detection
     const contextOptions: any = {
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -488,7 +519,9 @@ export async function scrapeWithModules(
   } catch (error) {
     throw error;
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 

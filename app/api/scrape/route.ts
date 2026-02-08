@@ -38,6 +38,50 @@ function shouldUsePythonBackend(body: any): boolean {
   return false;
 }
 
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return String(error);
+}
+
+function mapScrapeErrorToResponse(error: unknown): { status: number; message: string } {
+  const message = toErrorMessage(error);
+
+  if (message.startsWith('SCRAPER_BROWSER_MISSING:')) {
+    return {
+      status: 503,
+      message:
+        'Scraper runtime is missing the Playwright browser binary. Deploy with a runtime that includes Chromium or install Playwright browsers during build.',
+    };
+  }
+
+  if (message.startsWith('SCRAPER_BROWSER_LAUNCH_FAILED:')) {
+    return {
+      status: 503,
+      message: 'Scraper browser failed to start in this environment. Please try again later.',
+    };
+  }
+
+  if (/Navigation timeout|Timeout \d+ms exceeded/i.test(message)) {
+    return {
+      status: 504,
+      message: 'The target page took too long to load. Please retry or use a simpler page URL.',
+    };
+  }
+
+  if (/ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_INTERNET_DISCONNECTED/i.test(message)) {
+    return {
+      status: 502,
+      message: 'Could not reach the target site from the scraper server. Please verify the URL and try again.',
+    };
+  }
+
+  return {
+    status: 500,
+    message: 'Failed to scrape website. Please retry in a moment.',
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -119,12 +163,13 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Scraping error:', error);
+    const mapped = mapScrapeErrorToResponse(error);
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to scrape website',
+        error: mapped.message,
       },
-      { status: 500 }
+      { status: mapped.status }
     );
   }
 }
