@@ -91,6 +91,20 @@ function decodeEmbeddedUrl(value: string): string {
     .replace(/&amp;/g, '&');
 }
 
+function inferVideoProvider(url: string): string | undefined {
+  const value = url.toLowerCase();
+  if (value.includes('youtube.com') || value.includes('youtu.be')) return 'youtube';
+  if (value.includes('vimeo.com')) return 'vimeo';
+  if (value.includes('dailymotion.com')) return 'dailymotion';
+  if (value.includes('wistia.')) return 'wistia';
+  if (value.includes('loom.com')) return 'loom';
+  if (value.includes('brightcove')) return 'brightcove';
+  if (value.includes('jwplayer')) return 'jwplayer';
+  if (value.includes('twitch.tv')) return 'twitch';
+  if (value.includes('adobe.io/v1/player/ccv')) return 'behance';
+  return undefined;
+}
+
 function collectMediaUrlsFromHtml(html: string): string[] {
   const matches: string[] = [];
   const patterns = [
@@ -111,6 +125,85 @@ function collectMediaUrlsFromHtml(html: string): string[] {
   }
 
   return matches;
+}
+
+function collectEmbeddedPlayerUrlsFromHtml(html: string): string[] {
+  const matches: string[] = [];
+  const patterns = [
+    /<iframe[^>]+src=["']([^"']+)["']/gi,
+    /<embed[^>]+src=["']([^"']+)["']/gi,
+    /"embedUrl"\s*:\s*"([^"]+)"/gi,
+    /"player"\s*:\s*"([^"]+)"/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(html)) !== null) {
+      const raw = match[1];
+      if (!raw) continue;
+      const decoded = decodeEmbeddedUrl(raw.trim());
+      if (decoded) matches.push(decoded);
+    }
+  }
+
+  return matches;
+}
+
+async function scrapeVideosWithoutBrowser(url: string): Promise<VideoData[]> {
+  const response = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch page for video extraction (${response.status})`);
+  }
+
+  const html = await response.text();
+  const directCandidates = collectMediaUrlsFromHtml(html).map((value) => resolveUrl(value, url));
+  const embeddedCandidates = collectEmbeddedPlayerUrlsFromHtml(html).map((value) => resolveUrl(value, url));
+
+  const seen = new Set<string>();
+  const videos: VideoData[] = [];
+
+  for (const candidate of directCandidates) {
+    if (!DIRECT_VIDEO_PATTERN.test(candidate)) continue;
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    videos.push({
+      url: candidate,
+      provider: inferVideoProvider(candidate),
+      mimeType: candidate.includes('.m3u8')
+        ? 'application/vnd.apple.mpegurl'
+        : candidate.includes('.mpd')
+          ? 'application/dash+xml'
+          : undefined,
+      isEmbedded: false,
+    });
+  }
+
+  for (const candidate of embeddedCandidates) {
+    const provider = inferVideoProvider(candidate);
+    if (!provider && !candidate.includes('/embed') && !candidate.includes('/player')) continue;
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    videos.push({
+      url: candidate,
+      provider,
+      isEmbedded: true,
+    });
+  }
+
+  const enriched = await enrichVideoEntries(videos, url);
+  return enriched.sort((a, b) => {
+    const aEmbedded = a.isEmbedded ? 1 : 0;
+    const bEmbedded = b.isEmbedded ? 1 : 0;
+    return aEmbedded - bEmbedded;
+  });
 }
 
 async function enrichVideoEntries(videos: VideoData[], pageUrl: string): Promise<VideoData[]> {
@@ -188,7 +281,15 @@ export async function scrapeWithModules(
 
   try {
     // Launch browser with Vercel-safe fallback.
-    browser = await launchScraperBrowser();
+    try {
+      browser = await launchScraperBrowser();
+    } catch (launchError) {
+      const isVideosOnly = modules.length === 1 && modules[0] === 'videos';
+      if (isVideosOnly) {
+        return { videos: await scrapeVideosWithoutBrowser(url) };
+      }
+      throw launchError;
+    }
 
     // Enhanced browser context to avoid geo-blocks and bot detection
     const contextOptions: any = {
