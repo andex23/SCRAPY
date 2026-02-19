@@ -282,7 +282,7 @@ export default function ResultsSection({
 
       {/* Export All Buttons */}
       {activeTab === 'all' && (
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button
             onClick={() => downloadCsv(displayResults)}
             className="px-6 py-2 bg-accent hover:bg-foreground text-background rounded-lg transition-colors text-sm"
@@ -302,13 +302,13 @@ export default function ResultsSection({
       {displayResults.products && displayResults.products.length > 0 && shouldShowSection('products') && (
         <section className="bg-background border border-border rounded-lg overflow-hidden">
           <div className="bg-gradient-to-r from-green-500/10 to-transparent px-6 py-4 border-b border-border">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <span className="w-3 h-3 bg-green-500 rounded-full"></span>
                 <h3 className="text-lg font-medium">Products</h3>
                 <span className="text-sm text-accent/50">({displayResults.products.length} items)</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-accent/50">
                   {selectedProducts.size} selected
                 </span>
@@ -344,7 +344,7 @@ export default function ResultsSection({
                   selectedProducts.has(idx) ? 'bg-green-500/5 border-l-2 border-l-green-500' : ''
                 }`}
               >
-                <div className="flex gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
                   {/* Checkbox */}
                   <div className="flex-shrink-0 pt-1">
                     <input
@@ -356,7 +356,7 @@ export default function ResultsSection({
                   </div>
 
                   {/* Image */}
-                  <div className="flex-shrink-0">
+                  <div className="flex-shrink-0 self-start sm:self-auto">
                     {product.image ? (
                       <img
                         src={product.image}
@@ -379,7 +379,7 @@ export default function ResultsSection({
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-base truncate">{product.title}</h4>
                         {product.price && (
@@ -416,13 +416,13 @@ export default function ResultsSection({
       {displayResults.images && displayResults.images.length > 0 && shouldShowSection('images') && (
         <section className="bg-background border border-border rounded-lg overflow-hidden">
           <div className="bg-gradient-to-r from-blue-500/10 to-transparent px-6 py-4 border-b border-border">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
                 <h3 className="text-lg font-medium">Images</h3>
                 <span className="text-sm text-accent/50">({displayResults.images.length} items)</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-accent/50">
                   {selectedImages.size} selected
                 </span>
@@ -513,13 +513,13 @@ export default function ResultsSection({
       {displayResults.videos && displayResults.videos.length > 0 && shouldShowSection('videos') && (
         <section className="bg-background border border-border rounded-lg overflow-hidden">
           <div className="bg-gradient-to-r from-red-500/10 to-transparent px-6 py-4 border-b border-border">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <span className="w-3 h-3 bg-red-500 rounded-full"></span>
                 <h3 className="text-lg font-medium">Videos</h3>
                 <span className="text-sm text-accent/50">({displayResults.videos.length} items)</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-accent/50">
                   {selectedVideos.size} selected
                 </span>
@@ -610,7 +610,7 @@ export default function ResultsSection({
                   </div>
 
                   <div className="p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <h4 className="text-sm font-medium truncate">
                         {video.title || `Video ${idx + 1}`}
                       </h4>
@@ -757,12 +757,12 @@ export default function ResultsSection({
 
           <div className="divide-y divide-border">
             {displayResults.assets.map((asset, idx) => (
-              <div key={idx} className="flex items-center justify-between p-4 hover:bg-hover/30 transition-colors">
-                <div className="flex items-center gap-4">
+              <div key={idx} className="flex flex-col gap-3 p-4 hover:bg-hover/30 transition-colors sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4 min-w-0">
                   <span className="px-2 py-1 text-xs font-medium bg-orange-500/20 text-orange-400 rounded uppercase">
                     {asset.type}
                   </span>
-                  <span className="text-sm">{asset.filename}</span>
+                  <span className="text-sm break-all">{asset.filename}</span>
                 </div>
                 <a
                   href={asset.url}
@@ -813,7 +813,7 @@ export default function ResultsSection({
       {displayResults.text && (displayResults.text.title || displayResults.text.meta || displayResults.text.headings.length > 0 || displayResults.text.paragraphs.length > 0) && shouldShowSection('text') && (
         <section className="bg-background border border-border rounded-lg overflow-hidden">
           <div className="bg-gradient-to-r from-pink-500/10 to-transparent px-6 py-4 border-b border-border">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <span className="w-3 h-3 bg-pink-500 rounded-full"></span>
                 <h3 className="text-lg font-medium">Text Content</h3>
@@ -890,7 +890,7 @@ export default function ResultsSection({
           <div className="p-6 space-y-6">
             {displayResults.screenshot.fullPage && (
               <div>
-                <div className="flex items-center justify-between mb-3">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <h4 className="text-sm font-medium text-accent/70">Full Page</h4>
                   <button
                     onClick={() => downloadScreenshot(displayResults.screenshot!.fullPage!, 'fullpage')}
@@ -911,7 +911,7 @@ export default function ResultsSection({
 
             {displayResults.screenshot.viewport && (
               <div>
-                <div className="flex items-center justify-between mb-3">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <h4 className="text-sm font-medium text-accent/70">Viewport</h4>
                   <button
                     onClick={() => downloadScreenshot(displayResults.screenshot!.viewport!, 'viewport')}

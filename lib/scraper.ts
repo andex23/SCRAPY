@@ -149,6 +149,190 @@ function collectEmbeddedPlayerUrlsFromHtml(html: string): string[] {
   return matches;
 }
 
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractAttribute(tag: string, attribute: string): string | undefined {
+  const pattern = new RegExp(`${attribute}\\s*=\\s*["']([^"']+)["']`, 'i');
+  const match = tag.match(pattern);
+  return match?.[1] ? decodeHtmlEntities(match[1]) : undefined;
+}
+
+function extractTextContent(html: string, tag: string): string[] {
+  const pattern = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+  const values: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(html)) !== null) {
+    const cleaned = stripHtml(match[1] || '');
+    if (cleaned) values.push(cleaned);
+  }
+  return values;
+}
+
+function extractLinksFromHtml(html: string, baseUrl: string): string[] {
+  const links: string[] = [];
+  const pattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(html)) !== null) {
+    const href = decodeHtmlEntities((match[1] || '').trim());
+    if (!href || href.startsWith('javascript:') || href.startsWith('#') || href.startsWith('mailto:')) continue;
+    links.push(resolveUrl(href, baseUrl));
+  }
+
+  return Array.from(new Set(links));
+}
+
+function extractContactsFromHtml(html: string): ScrapeResult['contacts'] {
+  const emailMatches = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}/g) || [];
+  const phoneMatches =
+    html.match(/(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}/g) || [];
+  const socialMatches =
+    html.match(/https?:\/\/(?:www\.)?(?:instagram|facebook|twitter|x|linkedin|tiktok|youtube|pinterest)\.com\/[^\s"'<>]+/gi) || [];
+
+  return {
+    emails: Array.from(new Set(emailMatches)).slice(0, 100),
+    phones: Array.from(new Set(phoneMatches.map((value) => value.trim()).filter((value) => value.length >= 7))).slice(0, 100),
+    socials: Array.from(new Set(socialMatches)).slice(0, 100),
+  };
+}
+
+function extractAssetsFromHtml(html: string, baseUrl: string): ScrapeResult['assets'] {
+  const assetPattern =
+    /<a\b[^>]*href=["']([^"']+\.(?:pdf|zip|rar|doc|docx|xls|xlsx|csv|json|xml|mp3|wav|ogg|mp4|webm|mov|m4v))(?:\?[^"']*)?["'][^>]*>/gi;
+  const assets: NonNullable<ScrapeResult['assets']> = [];
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+
+  while ((match = assetPattern.exec(html)) !== null) {
+    const rawUrl = decodeHtmlEntities(match[1] || '');
+    if (!rawUrl) continue;
+    const url = resolveUrl(rawUrl, baseUrl);
+    if (seen.has(url)) continue;
+    seen.add(url);
+
+    const filename = url.split('/').pop() || 'asset';
+    const extension = (filename.split('.').pop() || 'file').toLowerCase();
+    assets.push({
+      filename,
+      url,
+      type: extension,
+    });
+  }
+
+  return assets.slice(0, 200);
+}
+
+function extractImagesFromHtml(html: string, baseUrl: string): ScrapeResult['images'] {
+  const imagePattern = /<img\b[^>]*>/gi;
+  const images: NonNullable<ScrapeResult['images']> = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = imagePattern.exec(html)) !== null) {
+    const tag = match[0];
+    const src = extractAttribute(tag, 'src') || extractAttribute(tag, 'data-src');
+    if (!src) continue;
+    images.push({
+      url: upgradeToHighQuality(resolveUrl(src, baseUrl)),
+      alt: extractAttribute(tag, 'alt'),
+      width: Number(extractAttribute(tag, 'width')) || undefined,
+      height: Number(extractAttribute(tag, 'height')) || undefined,
+    });
+  }
+
+  const filtered = filterImages(images);
+  return deduplicateImages(filtered).slice(0, 400);
+}
+
+function extractTextFromHtml(html: string): ScrapeResult['text'] {
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const metaMatch = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["'][^>]*>/i);
+
+  const headings = [
+    ...extractTextContent(html, 'h1'),
+    ...extractTextContent(html, 'h2'),
+    ...extractTextContent(html, 'h3'),
+  ];
+
+  const paragraphs = extractTextContent(html, 'p');
+
+  return {
+    title: decodeHtmlEntities(stripHtml(titleMatch?.[1] || '')),
+    meta: decodeHtmlEntities(stripHtml(metaMatch?.[1] || '')),
+    headings: headings.slice(0, 120),
+    paragraphs: paragraphs.slice(0, 200),
+  };
+}
+
+async function scrapeWithoutBrowser(
+  url: string,
+  modules: string[],
+  crawlDepth?: number
+): Promise<ScrapeResult> {
+  const response = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch page for fallback scraping (${response.status})`);
+  }
+
+  const html = await response.text();
+  const result: ScrapeResult = {};
+
+  if (modules.includes('images')) {
+    result.images = extractImagesFromHtml(html, url);
+  }
+
+  if (modules.includes('videos')) {
+    result.videos = await scrapeVideosWithoutBrowser(url);
+  }
+
+  if (modules.includes('text')) {
+    result.text = extractTextFromHtml(html);
+  }
+
+  if (modules.includes('contacts')) {
+    result.contacts = extractContactsFromHtml(html);
+  }
+
+  if (modules.includes('assets')) {
+    result.assets = extractAssetsFromHtml(html, url);
+  }
+
+  if (modules.includes('crawl')) {
+    const links = extractLinksFromHtml(html, url);
+    if (crawlDepth && crawlDepth > 1) {
+      result.crawl = links.slice(0, 500);
+    } else {
+      result.crawl = links.slice(0, 300);
+    }
+  }
+
+  if (modules.includes('products')) {
+    // Product extraction generally requires rendered DOM/JS.
+    result.products = [];
+  }
+
+  return result;
+}
+
 async function scrapeVideosWithoutBrowser(url: string): Promise<VideoData[]> {
   const response = await fetch(url, {
     redirect: 'follow',
@@ -284,11 +468,7 @@ export async function scrapeWithModules(
     try {
       browser = await launchScraperBrowser();
     } catch (launchError) {
-      const isVideosOnly = modules.length === 1 && modules[0] === 'videos';
-      if (isVideosOnly) {
-        return { videos: await scrapeVideosWithoutBrowser(url) };
-      }
-      throw launchError;
+      return await scrapeWithoutBrowser(url, modules, crawlDepth);
     }
 
     // Enhanced browser context to avoid geo-blocks and bot detection

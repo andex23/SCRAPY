@@ -309,10 +309,10 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen p-8 md:p-12 lg:p-16 flex flex-col">
+    <main className="min-h-screen px-4 py-6 sm:px-6 sm:py-8 md:px-10 md:py-10 lg:px-12 lg:py-12 flex flex-col">
       <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col">
         {/* Header */}
-        <header className="mb-12">
+        <header className="mb-8 sm:mb-10">
           <h1 className="text-2xl md:text-3xl mb-2 font-heading flex items-center gap-1">
             scrape anything
             <span className="inline-block w-2 h-6 bg-foreground animate-blink"></span>
@@ -323,8 +323,8 @@ export default function Home() {
         </header>
 
         {/* Mode Toggle & History */}
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex gap-2">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setShowWizard(true)}
@@ -363,7 +363,7 @@ export default function Home() {
               bulk
             </button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setShowHistory(true)}
@@ -434,14 +434,14 @@ export default function Home() {
                 className="w-full px-4 py-3 border border-border bg-background text-foreground rounded focus:outline-none focus:border-accent transition-colors font-mono text-sm"
                 disabled={loading}
               />
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-xs text-accent/60">
                   {bulkUrls.split('\n').filter(l => l.trim()).length} URLs
                 </span>
                 <button
                   type="submit"
                   disabled={loading || selectedModules.length === 0}
-                  className="px-8 py-3 bg-accent hover:bg-foreground text-background rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="w-full sm:w-auto px-8 py-3 bg-accent hover:bg-foreground text-background rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   {loading
                     ? `scraping ${bulkProgress.current}/${bulkProgress.total}...`
@@ -524,17 +524,17 @@ export default function Home() {
             <h3 className="text-sm text-accent/60 mb-4">bulk results ({bulkResults.length})</h3>
             {bulkResults.map((item, idx) => (
               <div key={idx} className="border border-border rounded p-4">
-                <div className="flex items-center justify-between mb-3">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <a
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-accent hover:text-foreground underline truncate flex-1"
+                    className="text-sm text-accent hover:text-foreground underline break-all sm:truncate sm:flex-1"
                   >
                     {item.url}
                   </a>
                   {item.error && (
-                    <span className="text-xs text-error ml-2">{item.error}</span>
+                    <span className="text-xs text-error sm:ml-2">{item.error}</span>
                   )}
                 </div>
                 {!item.error && (
@@ -578,7 +578,7 @@ export default function Home() {
         {!loading && !isBulkMode && Object.keys(results).length > 0 && (
           <div className="space-y-6">
             {/* Preview Toggle */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-sm text-accent/70">results</h3>
               <button
                 onClick={() => setShowPreview(!showPreview)}
