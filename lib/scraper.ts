@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium, Page } from 'playwright';
 import { ScrapeResult, AuthConfig, ProductData, VideoData } from '@/types';
 import { resolveUrl, deduplicateImages, filterImages, upgradeToHighQuality } from './utils';
 import { extractImages } from './modules/images';
@@ -177,9 +177,55 @@ function shouldAttemptBrowserlessFallback(error: unknown): boolean {
     /Navigation timeout|Timeout \d+ms exceeded/i.test(message) ||
     /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_INTERNET_DISCONNECTED/i.test(message) ||
     /net::ERR_/i.test(message) ||
+    /interrupted by another navigation/i.test(message) ||
     /Target page, context or browser has been closed/i.test(message) ||
     /SCRAPER_BROWSER_MISSING|SCRAPER_BROWSER_LAUNCH_FAILED/i.test(message)
   );
+}
+
+async function navigateWithFallback(page: Page, url: string): Promise<void> {
+  const attempts: Array<{ waitUntil: 'domcontentloaded' | 'load'; timeout: number }> = [
+    { waitUntil: 'domcontentloaded', timeout: 30000 },
+    { waitUntil: 'load', timeout: 45000 },
+  ];
+
+  let lastError: unknown = null;
+
+  for (const attempt of attempts) {
+    try {
+      const response = await page.goto(url, {
+        waitUntil: attempt.waitUntil,
+        timeout: attempt.timeout,
+      });
+
+      if (response && response.status() >= 400) {
+        throw new Error(`SCRAPER_TARGET_HTTP_${response.status()}: ${url}`);
+      }
+
+      // networkidle is best-effort only; many commerce/SPA pages keep long polling connections.
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 12000 });
+      } catch {
+        // ignore networkidle timeout
+      }
+
+      return;
+    } catch (error) {
+      lastError = error;
+      const message = toErrorMessage(error);
+
+      if (/interrupted by another navigation/i.test(message)) {
+        try {
+          await page.waitForLoadState('domcontentloaded', { timeout: 12000 });
+          return;
+        } catch (waitError) {
+          lastError = waitError;
+        }
+      }
+    }
+  }
+
+  throw normalizeScraperRuntimeError(lastError || new Error('Navigation failed'));
 }
 
 function collectMediaUrlsFromHtml(html: string): string[] {
@@ -846,31 +892,8 @@ export async function scrapeWithModules(
       };
     });
 
-    // Navigate to the URL with fallback strategy
-    try {
-      // Try networkidle first (best for complete page load)
-      await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: 30000,
-      });
-    } catch (error) {
-      // Fallback: if networkidle times out, try with domcontentloaded
-      try {
-        await page.goto(url, {
-          waitUntil: 'domcontentloaded',
-          timeout: 15000,
-        });
-        // Give it a bit more time for images and lazy-loaded content
-        await page.waitForTimeout(5000);
-      } catch (fallbackError) {
-        // Last resort: just try to load the page
-        await page.goto(url, {
-          waitUntil: 'load',
-          timeout: 20000,
-        });
-        await page.waitForTimeout(3000);
-      }
-    }
+    // Navigate with resilient strategy that avoids nested goto interruptions.
+    await navigateWithFallback(page, url);
 
     // Handle common consent/cookie banners that might block content
     try {

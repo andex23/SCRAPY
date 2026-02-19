@@ -63,6 +63,8 @@ function mapScrapeErrorToResponse(error: unknown): {
   const message = toErrorMessage(error);
   const fallbackStatusMatch = message.match(/\((\d{3})\)/);
   const fallbackStatusCode = fallbackStatusMatch ? Number(fallbackStatusMatch[1]) : undefined;
+  const targetHttpMatch = message.match(/SCRAPER_TARGET_HTTP_(\d{3})/);
+  const targetHttpCode = targetHttpMatch ? Number(targetHttpMatch[1]) : undefined;
 
   if (message.startsWith('SCRAPER_QUEUE_TIMEOUT:')) {
     return {
@@ -95,6 +97,39 @@ function mapScrapeErrorToResponse(error: unknown): {
       status: 503,
       message: 'Scraper browser failed to start in this environment. Please try again later.',
     };
+  }
+
+  if (targetHttpCode) {
+    if (targetHttpCode === 401 || targetHttpCode === 403) {
+      return {
+        status: 502,
+        message:
+          'The target site blocked scraper access (HTTP ' +
+          targetHttpCode +
+          '). Try adding auth cookies/headers or scrape a public page.',
+      };
+    }
+
+    if (targetHttpCode === 404) {
+      return {
+        status: 404,
+        message: 'The target page could not be found (HTTP 404). Please verify the URL.',
+      };
+    }
+
+    if (targetHttpCode === 429) {
+      return {
+        status: 429,
+        message: 'The target site is rate-limiting requests (HTTP 429). Please retry after a short wait.',
+      };
+    }
+
+    if (targetHttpCode >= 500) {
+      return {
+        status: 502,
+        message: 'The target site returned a server error (HTTP ' + targetHttpCode + '). Please retry in a moment.',
+      };
+    }
   }
 
   if (/Navigation timeout|Timeout \d+ms exceeded/i.test(message)) {
@@ -151,6 +186,13 @@ function mapScrapeErrorToResponse(error: unknown): {
     return {
       status: 502,
       message: 'Network connection to the target site failed from the scraper server. Please retry.',
+    };
+  }
+
+  if (/interrupted by another navigation/i.test(message)) {
+    return {
+      status: 502,
+      message: 'Navigation became unstable while loading the target page. Please retry.',
     };
   }
 
