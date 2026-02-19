@@ -51,8 +51,7 @@ export async function extractText(page: Page): Promise<TextData> {
   return {
     title: clean(content.title),
     meta: clean(content.meta),
-    headings: content.headings.map(clean).slice(0, 50), // Limit to 50 headings
-    paragraphs: content.paragraphs.map(clean).slice(0, 100), // Limit to 100 paragraphs
+    headings: content.headings.map(clean),
+    paragraphs: content.paragraphs.map(clean),
   };
 }
-

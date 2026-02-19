@@ -87,14 +87,14 @@ export default function ProductPreviewTable({ products, onUpdate, onExport }: Pr
   return (
     <>
       <div className="border border-border rounded p-4 bg-hover/30">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-4">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-sm text-accent/70">product preview</h3>
             <span className="text-xs text-accent/50">
               {selectedIds.size} of {editedProducts.length} selected
             </span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={handleSelectAll}
               className="px-3 py-1 text-xs border border-border hover:bg-hover rounded"
@@ -117,7 +117,7 @@ export default function ProductPreviewTable({ products, onUpdate, onExport }: Pr
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[860px] text-sm">
             <thead>
               <tr className="border-b border-border">
                 <th className="text-left py-2 px-2">
@@ -219,7 +219,7 @@ export default function ProductPreviewTable({ products, onUpdate, onExport }: Pr
         {selectedIds.size > 0 && (
           <div className="mt-4 p-3 bg-accent/10 rounded">
             <h4 className="text-xs text-accent/70 mb-2">bulk edit selected ({selectedIds.size})</h4>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <input
                 type="text"
                 placeholder="set price for all"

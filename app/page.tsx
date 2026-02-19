@@ -18,6 +18,9 @@ import { ScheduledJob } from '@/lib/scheduler';
 import { downloadCsv } from '@/lib/exportCsv';
 import { downloadJson } from '@/lib/exportJson';
 
+type ImageDownloadFormat = 'original' | 'jpg' | 'jpeg' | 'png' | 'webp' | 'gif' | 'svg' | 'avif';
+type VideoDownloadFormat = 'original' | 'mp4' | 'webm' | 'mov' | 'm4v' | 'm3u8' | 'mpd' | 'mkv' | 'ogv' | 'ts';
+
 export default function Home() {
   const [url, setUrl] = useState('');
   const [bulkUrls, setBulkUrls] = useState('');
@@ -36,6 +39,9 @@ export default function Home() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [filteredProducts, setFilteredProducts] = useState<ScrapeResult['products']>(undefined);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadStatusTitle, setDownloadStatusTitle] = useState('');
+  const [downloadStatusMessage, setDownloadStatusMessage] = useState('');
 
   const handleScrape = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,18 +248,21 @@ export default function Home() {
     }
   };
 
-  const handleDownloadAllImages = async () => {
+  const handleDownloadAllImages = async (downloadFormat: ImageDownloadFormat = 'original') => {
     const imageUrls = results.images?.map((img) => img.url) || [];
-    await downloadMediaZip('/api/download', 'imageUrls', imageUrls, 'scraped-images', 'images');
+    await downloadMediaZip('/api/download', 'imageUrls', imageUrls, 'scraped-images', 'images', downloadFormat);
   };
 
-  const handleDownloadAllVideos = async () => {
+  const handleDownloadAllVideos = async (downloadFormat: VideoDownloadFormat = 'original') => {
     const videoUrls = results.videos?.map((video) => video.url) || [];
-    await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos');
+    await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos', downloadFormat);
   };
 
-  const handleDownloadVideos = async (videoUrls: string[]) => {
-    await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos');
+  const handleDownloadVideos = async (
+    videoUrls: string[],
+    downloadFormat: VideoDownloadFormat = 'original'
+  ) => {
+    await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos', downloadFormat);
   };
 
   const downloadMediaZip = async (
@@ -261,11 +270,18 @@ export default function Home() {
     payloadKey: 'imageUrls' | 'videoUrls',
     urls: string[],
     filenamePrefix: string,
-    mediaLabel: string
+    mediaLabel: string,
+    downloadFormat: string = 'original'
   ) => {
     if (!urls || urls.length === 0) return;
 
-    setLoading(true);
+    const formatLabel = (downloadFormat || 'original').toUpperCase();
+    setIsDownloading(true);
+    setDownloadStatusTitle('Preparing download');
+    setDownloadStatusMessage(`Collecting ${mediaLabel} files (${formatLabel})...`);
+
+    let hasError = false;
+
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -274,6 +290,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           [payloadKey]: urls,
+          downloadFormat,
         }),
       });
 
@@ -290,6 +307,9 @@ export default function Home() {
         throw new Error(message);
       }
 
+      setDownloadStatusTitle('Downloading');
+      setDownloadStatusMessage('Building ZIP and sending it to your browser...');
+
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -299,12 +319,20 @@ export default function Home() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(downloadUrl);
+
+      setDownloadStatusTitle('Download started');
+      setDownloadStatusMessage('Your file is now downloading in your browser.');
     } catch (err) {
+      hasError = true;
       const message = err instanceof Error ? err.message : `Failed to download ${mediaLabel}`;
+      setDownloadStatusTitle('Download failed');
+      setDownloadStatusMessage(message);
       alert(message);
       console.error('Download error:', err);
     } finally {
-      setLoading(false);
+      window.setTimeout(() => {
+        setIsDownloading(false);
+      }, hasError ? 2200 : 1400);
     }
   };
 
@@ -491,8 +519,14 @@ export default function Home() {
         {/* Loading state */}
         {loading && Object.keys(results).length === 0 && (
           <div className="text-center py-20 space-y-4">
-            <div className="inline-block">
-              <span className="text-accent animate-pulse">— scanning page —</span>
+            <div className="mx-auto w-14 h-14 rounded-full border-2 border-accent/20 border-t-accent animate-spin"></div>
+            <div className="inline-flex items-center gap-3">
+              <span className="text-accent animate-pulse">scanning page</span>
+              <span className="inline-flex items-end gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce" style={{ animationDelay: '120ms' }}></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-bounce" style={{ animationDelay: '240ms' }}></span>
+              </span>
             </div>
             {!isBulkMode && (
               <div className="mt-4">
@@ -540,31 +574,34 @@ export default function Home() {
                 {!item.error && (
                   <ResultsSection
                     results={item.result}
-                    onDownloadAllImages={() =>
+                    onDownloadAllImages={(downloadFormat) =>
                       downloadMediaZip(
                         '/api/download',
                         'imageUrls',
                         item.result.images?.map((img) => img.url) || [],
                         'scraped-images',
-                        'images'
+                        'images',
+                        downloadFormat || 'original'
                       )
                     }
-                    onDownloadAllVideos={() =>
+                    onDownloadAllVideos={(downloadFormat) =>
                       downloadMediaZip(
                         '/api/download/videos',
                         'videoUrls',
                         item.result.videos?.map((video) => video.url) || [],
                         'scraped-videos',
-                        'videos'
+                        'videos',
+                        downloadFormat || 'original'
                       )
                     }
-                    onDownloadVideos={(videoUrls) =>
+                    onDownloadVideos={(videoUrls, downloadFormat) =>
                       downloadMediaZip(
                         '/api/download/videos',
                         'videoUrls',
                         videoUrls,
                         'scraped-videos',
-                        'videos'
+                        'videos',
+                        downloadFormat || 'original'
                       )
                     }
                   />
@@ -645,6 +682,24 @@ export default function Home() {
       <footer className="mt-16 text-center text-xs text-accent/40">
         © AVD studios
       </footer>
+
+      {/* Download Status Overlay */}
+      {isDownloading && (
+        <div className="fixed inset-0 z-50 bg-background/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md border border-border rounded-xl bg-background shadow-2xl p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="w-3 h-3 rounded-full bg-accent animate-pulse"></span>
+              <h3 className="text-lg font-medium">{downloadStatusTitle || 'Preparing download'}</h3>
+            </div>
+            <div className="h-2 bg-hover/60 rounded-full overflow-hidden">
+              <div className="h-full w-full bg-accent/70 animate-pulse"></div>
+            </div>
+            <p className="mt-3 text-sm text-accent/70">
+              {downloadStatusMessage || 'Please keep this tab open while we prepare your file.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* History Panel */}
       {showHistory && (

@@ -49,6 +49,8 @@ function toErrorMessage(error: unknown): string {
 
 function mapScrapeErrorToResponse(error: unknown): { status: number; message: string } {
   const message = toErrorMessage(error);
+  const fallbackStatusMatch = message.match(/\((\d{3})\)/);
+  const fallbackStatusCode = fallbackStatusMatch ? Number(fallbackStatusMatch[1]) : undefined;
 
   if (message.startsWith('SCRAPER_BROWSER_MISSING:')) {
     return {
@@ -76,6 +78,49 @@ function mapScrapeErrorToResponse(error: unknown): { status: number; message: st
     return {
       status: 502,
       message: 'Could not reach the target site from the scraper server. Please verify the URL and try again.',
+    };
+  }
+
+  if (/Failed to fetch page for fallback scraping|Unable to fetch page for video extraction/i.test(message) && fallbackStatusCode) {
+    if (fallbackStatusCode === 401 || fallbackStatusCode === 403) {
+      return {
+        status: 502,
+        message:
+          'The target site blocked scraper access (HTTP ' +
+          fallbackStatusCode +
+          '). Try adding auth cookies/headers or scrape a public page.',
+      };
+    }
+
+    if (fallbackStatusCode === 404) {
+      return {
+        status: 404,
+        message: 'The target page could not be found (HTTP 404). Please verify the URL.',
+      };
+    }
+
+    if (fallbackStatusCode === 429) {
+      return {
+        status: 429,
+        message: 'The target site is rate-limiting requests (HTTP 429). Please retry after a short wait.',
+      };
+    }
+
+    if (fallbackStatusCode >= 500) {
+      return {
+        status: 502,
+        message:
+          'The target site returned a server error (HTTP ' +
+          fallbackStatusCode +
+          '). Please retry in a moment.',
+      };
+    }
+  }
+
+  if (/fetch failed|ECONNRESET|EHOSTUNREACH|ENOTFOUND/i.test(message)) {
+    return {
+      status: 502,
+      message: 'Network connection to the target site failed from the scraper server. Please retry.',
     };
   }
 

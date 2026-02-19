@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { ScrapeResult, AuthConfig, VideoData } from '@/types';
+import { ScrapeResult, AuthConfig, ProductData, VideoData } from '@/types';
 import { resolveUrl, deduplicateImages, filterImages, upgradeToHighQuality } from './utils';
 import { extractImages } from './modules/images';
 import { extractProducts } from './modules/products';
@@ -103,6 +103,83 @@ function inferVideoProvider(url: string): string | undefined {
   if (value.includes('twitch.tv')) return 'twitch';
   if (value.includes('adobe.io/v1/player/ccv')) return 'behance';
   return undefined;
+}
+
+function isProviderVideoUrl(url: string, provider?: string): boolean {
+  if (!provider) return false;
+
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.toLowerCase();
+    const search = parsed.search.toLowerCase();
+
+    if (provider === 'youtube') {
+      if (parsed.hostname.includes('youtu.be')) return pathname.split('/').filter(Boolean).length >= 1;
+      return pathname.includes('/watch') && search.includes('v=') || pathname.includes('/embed/') || pathname.includes('/shorts/');
+    }
+
+    if (provider === 'vimeo') {
+      return /\/\d+/.test(pathname) || pathname.includes('/video/');
+    }
+
+    if (provider === 'dailymotion') {
+      return pathname.includes('/video/') || pathname.includes('/embed/video/');
+    }
+
+    if (provider === 'loom') {
+      return pathname.includes('/share/');
+    }
+
+    if (provider === 'wistia') {
+      return pathname.includes('/medias/') || pathname.includes('/embed/');
+    }
+
+    if (provider === 'brightcove' || provider === 'jwplayer') {
+      return pathname.includes('/player/') || pathname.includes('/embed/');
+    }
+
+    if (provider === 'twitch') {
+      return pathname.includes('/videos/') || pathname.includes('/embed');
+    }
+
+    if (provider === 'behance') {
+      return pathname.includes('/v1/player/ccv');
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function looksLikeKnownEmbedUrl(url: string): boolean {
+  return /(youtube\.com\/embed\/|player\.vimeo\.com\/video\/|dailymotion\.com\/embed\/video\/|wistia\.com\/embed\/|loom\.com\/embed\/|brightcove|jwplayer|adobe\.io\/v1\/player\/ccv)/i.test(
+    url
+  );
+}
+
+function isValidVideoCandidate(video: Pick<VideoData, 'url' | 'provider' | 'mimeType' | 'isEmbedded'>): boolean {
+  if (!video.url) return false;
+
+  const provider = video.provider || inferVideoProvider(video.url);
+  const mime = (video.mimeType || '').toLowerCase();
+  const hasVideoMime = mime.includes('video') || mime.includes('mpegurl') || mime.includes('dash+xml');
+  const isDirectVideoFile = DIRECT_VIDEO_PATTERN.test(video.url);
+  const hasProviderVideoUrl = isProviderVideoUrl(video.url, provider);
+  const hasKnownEmbed = !!video.isEmbedded && looksLikeKnownEmbedUrl(video.url);
+
+  return isDirectVideoFile || hasVideoMime || hasProviderVideoUrl || hasKnownEmbed;
+}
+
+function shouldAttemptBrowserlessFallback(error: unknown): boolean {
+  const message = toErrorMessage(error);
+  return (
+    /Navigation timeout|Timeout \d+ms exceeded/i.test(message) ||
+    /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_INTERNET_DISCONNECTED/i.test(message) ||
+    /net::ERR_/i.test(message) ||
+    /Target page, context or browser has been closed/i.test(message) ||
+    /SCRAPER_BROWSER_MISSING|SCRAPER_BROWSER_LAUNCH_FAILED/i.test(message)
+  );
 }
 
 function collectMediaUrlsFromHtml(html: string): string[] {
@@ -233,6 +310,164 @@ function extractAssetsFromHtml(html: string, baseUrl: string): ScrapeResult['ass
   return assets.slice(0, 200);
 }
 
+function extractProductsFromHtml(html: string, baseUrl: string): ScrapeResult['products'] {
+  const products: ProductData[] = [];
+  const seenLinks = new Set<string>();
+
+  const clean = (value?: string | null): string => decodeHtmlEntities(stripHtml(value || ''));
+
+  const linkPath = (url: string): string => {
+    try {
+      return new URL(url, baseUrl).pathname.toLowerCase();
+    } catch {
+      return url.toLowerCase();
+    }
+  };
+
+  const isExcludedProductLink = (url: string): boolean => {
+    const path = linkPath(url);
+    if (path.includes('/product-category/') || path.includes('/category/') || path.includes('/tag/')) return true;
+    if (/\/(?:cart|checkout|account|my-account|wishlist)(?:\/|$)/.test(path)) return true;
+    return /[?&](add-to-cart|orderby|filter_|min_price|max_price|rating_filter)=/i.test(url);
+  };
+
+  const hasProductPathHint = (url: string): boolean => {
+    const path = linkPath(url);
+    return (
+      /\/(?:product|products|item|dp)\//.test(path) ||
+      /\/p\/[^/]+/.test(path)
+    );
+  };
+
+  const addProduct = (candidate: Partial<ProductData>) => {
+    const rawLink = candidate.link ? resolveUrl(candidate.link, baseUrl) : '';
+    if (!rawLink || seenLinks.has(rawLink) || isExcludedProductLink(rawLink)) return;
+
+    const title = clean(candidate.title);
+    if (!title || title.length < 2) return;
+
+    const image = candidate.image ? resolveUrl(candidate.image, baseUrl) : undefined;
+    const price = clean(candidate.price);
+    const description = clean(candidate.description);
+
+    const likelyByPath = hasProductPathHint(rawLink);
+    const hasPrice = /\d/.test(price);
+    const hasImage = !!image;
+
+    if (!likelyByPath && !(hasPrice && hasImage)) return;
+
+    seenLinks.add(rawLink);
+    products.push({
+      title,
+      price: price || undefined,
+      image,
+      link: rawLink,
+      description: description || undefined,
+    });
+  };
+
+  // Strategy 1: JSON-LD Product data.
+  const jsonLdPattern = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let scriptMatch: RegExpExecArray | null;
+  while ((scriptMatch = jsonLdPattern.exec(html)) !== null) {
+    const rawJson = scriptMatch[1]?.trim();
+    if (!rawJson) continue;
+    try {
+      const parsed = JSON.parse(rawJson);
+      const stack: any[] = [parsed];
+
+      while (stack.length > 0) {
+        const node = stack.pop();
+        if (!node) continue;
+
+        if (Array.isArray(node)) {
+          stack.push(...node);
+          continue;
+        }
+
+        if (typeof node !== 'object') continue;
+
+        if (Array.isArray(node['@graph'])) stack.push(...node['@graph']);
+        if (Array.isArray(node.itemListElement)) {
+          stack.push(...node.itemListElement.map((item: any) => item?.item || item));
+        }
+        if (node.item && typeof node.item === 'object') stack.push(node.item);
+
+        const type = String(node['@type'] || '').toLowerCase();
+        if (!type.includes('product')) continue;
+
+        const image = Array.isArray(node.image) ? node.image[0] : node.image;
+        const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
+
+        addProduct({
+          title: node.name,
+          link: node.url,
+          image,
+          price: offers?.price || offers?.lowPrice,
+          description: node.description,
+        });
+      }
+    } catch {
+      // Ignore malformed JSON-LD.
+    }
+  }
+
+  // Strategy 2: WooCommerce-style product list items.
+  const itemPattern = /<(?:li|div)[^>]*class=["'][^"']*\bproduct\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:li|div)>/gi;
+  let itemMatch: RegExpExecArray | null;
+  while ((itemMatch = itemPattern.exec(html)) !== null) {
+    const block = itemMatch[1] || '';
+
+    const link =
+      block.match(/<a[^>]+href=["']([^"']+)["'][^>]*>/i)?.[1] ||
+      block.match(/data-product-url=["']([^"']+)["']/i)?.[1];
+
+    const title =
+      block.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)?.[1] ||
+      block.match(/class=["'][^"']*(?:product-title|woocommerce-loop-product__title)[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i)?.[1] ||
+      block.match(/aria-label=["']([^"']+)["']/i)?.[1];
+
+    const image =
+      block.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/i)?.[1];
+
+    const price = clean(block.match(/<span[^>]*class=["'][^"']*\bprice\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1]);
+
+    addProduct({
+      title,
+      link,
+      image,
+      price,
+    });
+  }
+
+  // Strategy 3: Generic product links with image/title.
+  const genericLinkPattern = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]{0,2500}?)<\/a>/gi;
+  let genericMatch: RegExpExecArray | null;
+  while ((genericMatch = genericLinkPattern.exec(html)) !== null) {
+    const link = genericMatch[1] || '';
+    if (!link || isExcludedProductLink(link)) continue;
+    if (!hasProductPathHint(link)) continue;
+
+    const block = genericMatch[2] || '';
+    const title =
+      block.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)?.[1] ||
+      block.match(/<span[^>]*class=["'][^"']*(?:title|name)[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] ||
+      block;
+
+    const image = block.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/i)?.[1];
+    const price = clean(block.match(/<span[^>]*class=["'][^"']*\bprice\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1]);
+
+    addProduct({
+      title,
+      link,
+      image,
+      price,
+    });
+  }
+
+  return products.slice(0, 50);
+}
+
 function extractImagesFromHtml(html: string, baseUrl: string): ScrapeResult['images'] {
   const imagePattern = /<img\b[^>]*>/gi;
   const images: NonNullable<ScrapeResult['images']> = [];
@@ -270,8 +505,8 @@ function extractTextFromHtml(html: string): ScrapeResult['text'] {
   return {
     title: decodeHtmlEntities(stripHtml(titleMatch?.[1] || '')),
     meta: decodeHtmlEntities(stripHtml(metaMatch?.[1] || '')),
-    headings: headings.slice(0, 120),
-    paragraphs: paragraphs.slice(0, 200),
+    headings,
+    paragraphs,
   };
 }
 
@@ -326,8 +561,7 @@ async function scrapeWithoutBrowser(
   }
 
   if (modules.includes('products')) {
-    // Product extraction generally requires rendered DOM/JS.
-    result.products = [];
+    result.products = extractProductsFromHtml(html, url);
   }
 
   return result;
@@ -358,7 +592,7 @@ async function scrapeVideosWithoutBrowser(url: string): Promise<VideoData[]> {
     if (!DIRECT_VIDEO_PATTERN.test(candidate)) continue;
     if (seen.has(candidate)) continue;
     seen.add(candidate);
-    videos.push({
+    const directVideo: VideoData = {
       url: candidate,
       provider: inferVideoProvider(candidate),
       mimeType: candidate.includes('.m3u8')
@@ -367,23 +601,29 @@ async function scrapeVideosWithoutBrowser(url: string): Promise<VideoData[]> {
           ? 'application/dash+xml'
           : undefined,
       isEmbedded: false,
-    });
+    };
+    if (!isValidVideoCandidate(directVideo)) continue;
+    videos.push(directVideo);
   }
 
   for (const candidate of embeddedCandidates) {
     const provider = inferVideoProvider(candidate);
-    if (!provider && !candidate.includes('/embed') && !candidate.includes('/player')) continue;
+    if (!isProviderVideoUrl(candidate, provider) && !looksLikeKnownEmbedUrl(candidate)) continue;
     if (seen.has(candidate)) continue;
     seen.add(candidate);
-    videos.push({
+    const embeddedVideo: VideoData = {
       url: candidate,
       provider,
       isEmbedded: true,
-    });
+    };
+    if (!isValidVideoCandidate(embeddedVideo)) continue;
+    videos.push(embeddedVideo);
   }
 
   const enriched = await enrichVideoEntries(videos, url);
-  return enriched.sort((a, b) => {
+  return enriched
+    .filter((video) => isValidVideoCandidate(video))
+    .sort((a, b) => {
     const aEmbedded = a.isEmbedded ? 1 : 0;
     const bEmbedded = b.isEmbedded ? 1 : 0;
     return aEmbedded - bEmbedded;
@@ -753,13 +993,15 @@ export async function scrapeWithModules(
               .filter((video) => {
                 if (!video.url || seenVideos.has(video.url)) return false;
                 seenVideos.add(video.url);
-                return true;
+                return isValidVideoCandidate(video);
               });
-            result.videos = (await enrichVideoEntries(normalizedVideos, url)).sort((a, b) => {
-              const aEmbedded = a.isEmbedded ? 1 : 0;
-              const bEmbedded = b.isEmbedded ? 1 : 0;
-              return aEmbedded - bEmbedded;
-            });
+            result.videos = (await enrichVideoEntries(normalizedVideos, url))
+              .filter((video) => isValidVideoCandidate(video))
+              .sort((a, b) => {
+                const aEmbedded = a.isEmbedded ? 1 : 0;
+                const bEmbedded = b.isEmbedded ? 1 : 0;
+                return aEmbedded - bEmbedded;
+              });
             break;
 
           case 'products':
@@ -827,7 +1069,17 @@ export async function scrapeWithModules(
     await context.close();
     return result;
   } catch (error) {
-    throw error;
+    if (shouldAttemptBrowserlessFallback(error)) {
+      const fallbackModules = modules.filter((module) => module !== 'screenshot');
+      if (fallbackModules.length > 0) {
+        try {
+          return await scrapeWithoutBrowser(url, fallbackModules, crawlDepth);
+        } catch (fallbackError) {
+          throw normalizeScraperRuntimeError(fallbackError);
+        }
+      }
+    }
+    throw normalizeScraperRuntimeError(error);
   } finally {
     if (browser) {
       await browser.close();

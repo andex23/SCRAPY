@@ -32,6 +32,70 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
       return resolveUrl(src);
     };
 
+    const linkPath = (url: string): string => {
+      try {
+        return new URL(url, window.location.href).pathname.toLowerCase();
+      } catch {
+        return url.toLowerCase();
+      }
+    };
+
+    const isExcludedProductLink = (url: string): boolean => {
+      const path = linkPath(url);
+      if (path.includes('/product-category/') || path.includes('/category/') || path.includes('/tag/')) return true;
+      if (/\/(?:cart|checkout|account|my-account|wishlist)(?:\/|$)/.test(path)) return true;
+      return /[?&](add-to-cart|orderby|filter_|min_price|max_price|rating_filter)=/i.test(url);
+    };
+
+    const hasProductPathHint = (url: string): boolean => {
+      const path = linkPath(url);
+      return (
+        /\/(?:product|products|item|dp)\//.test(path) ||
+        /\/p\/[^/]+/.test(path) ||
+        path.includes('productpage.')
+      );
+    };
+
+    const isLikelyDecorativeImage = (imageUrl: string): boolean => {
+      const value = imageUrl.toLowerCase();
+      return (
+        value.includes('placeholder') ||
+        value.includes('sprite') ||
+        value.includes('icon') ||
+        value.includes('logo') ||
+        value.includes('/wp-content/plugins/')
+      );
+    };
+
+    const addProduct = (candidate: Partial<ProductData>) => {
+      const resolvedLink = resolveUrl(candidate.link);
+      if (!resolvedLink || seenLinks.has(resolvedLink) || isExcludedProductLink(resolvedLink)) return;
+
+      const title = clean(candidate.title);
+      if (!title || title.length < 2) return;
+
+      const rawImage = resolveUrl(candidate.image || undefined);
+      const image = rawImage && !isLikelyDecorativeImage(rawImage) ? rawImage : undefined;
+      const price = clean(candidate.price);
+      const description = clean(candidate.description);
+
+      const likelyByPath = hasProductPathHint(resolvedLink);
+      const hasPrice = /\d/.test(price);
+      const hasImage = !!image;
+
+      // Keep strict quality: product path OR both image+price hints.
+      if (!likelyByPath && !(hasPrice && hasImage)) return;
+
+      seenLinks.add(resolvedLink);
+      productData.push({
+        title,
+        price: price || undefined,
+        image,
+        link: resolvedLink,
+        description: description || undefined,
+      });
+    };
+
     // Strategy 1: Look for JSON-LD structured data
     const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
     jsonLdScripts.forEach((script) => {
@@ -40,17 +104,13 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
 
         // Handle single product
         if (data['@type'] === 'Product') {
-          const link = resolveUrl(data.url) || window.location.href;
-          if (!seenLinks.has(link)) {
-            seenLinks.add(link);
-            productData.push({
-              title: data.name || '',
-              price: data.offers?.price || data.offers?.lowPrice || undefined,
-              image: resolveUrl(data.image?.[0] || data.image) || undefined,
-              link,
-              description: data.description || undefined,
-            });
-          }
+          addProduct({
+            title: data.name || '',
+            price: data.offers?.price || data.offers?.lowPrice || undefined,
+            image: data.image?.[0] || data.image,
+            link: data.url || window.location.href,
+            description: data.description || undefined,
+          });
         }
 
         // Handle product list
@@ -58,14 +118,11 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
           data.itemListElement.forEach((item: any) => {
             if (item['@type'] === 'Product' || item.item?.['@type'] === 'Product') {
               const product = item.item || item;
-              const link = resolveUrl(product.url);
-              if (!link || seenLinks.has(link)) return;
-              seenLinks.add(link);
-              productData.push({
+              addProduct({
                 title: product.name || '',
                 price: product.offers?.price || product.offers?.lowPrice || undefined,
-                image: resolveUrl(product.image?.[0] || product.image) || undefined,
-                link,
+                image: product.image?.[0] || product.image,
+                link: product.url,
                 description: product.description || undefined,
               });
             }
@@ -110,7 +167,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
       for (const card of Array.from(allProductElements)) {
         const a = card.querySelector('a[href]') as HTMLAnchorElement | null;
         const link = a?.href || (card.querySelector('a') as HTMLAnchorElement)?.href;
-        if (!link || seenLinks.has(link)) continue;
+        if (!link) continue;
 
         // Try multiple title selectors for H&M
         const title =
@@ -130,15 +187,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
         const img = card.querySelector('img') as HTMLImageElement | null;
         const image = pickImg(img);
 
-        if (title && title.length > 2) {
-          seenLinks.add(link);
-          productData.push({
-            title,
-            price: price || undefined,
-            image,
-            link,
-          });
-        }
+        addProduct({ title, price: price || undefined, image, link });
       }
 
       // Heuristic B: listing grids using productpage.* links (fallback)
@@ -152,7 +201,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
 
         for (const a of listingLinks) {
           const link = a.href;
-          if (!link || seenLinks.has(link)) continue;
+          if (!link) continue;
 
           // Find a reasonable card/container
           const card =
@@ -170,15 +219,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
           const img = card ? (card.querySelector('img') as HTMLImageElement | null) : null;
           const image = pickImg(img);
 
-          if (title) {
-            seenLinks.add(link);
-            productData.push({
-              title,
-              price: price || undefined,
-              image,
-              link,
-            });
-          }
+          addProduct({ title, price: price || undefined, image, link });
         }
       }
 
@@ -188,7 +229,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
         cards.forEach((product) => {
           const a = product.querySelector('a[href]') as HTMLAnchorElement | null;
           const link = a?.href;
-          if (!link || seenLinks.has(link)) return;
+          if (!link) return;
 
           const title =
             clean(product.querySelector('.product-title, .product-name, [data-testid*="product-name"], [data-testid*="name"], [class*="title"], [class*="name"], h2, h3, h4')?.textContent || '') ||
@@ -199,15 +240,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
           const price = clean(product.querySelector('.price, [data-testid*="price"], [class*="price"], .money, [data-price]')?.textContent || '');
           const image = pickImg(product.querySelector('img') as HTMLImageElement | null);
 
-          if (title && title.length > 2) {
-            seenLinks.add(link);
-            productData.push({
-              title,
-              price: price || undefined,
-              image,
-              link,
-            });
-          }
+          addProduct({ title, price: price || undefined, image, link });
         });
       }
 
@@ -216,7 +249,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
         const allLinks = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
         for (const a of allLinks) {
           const href = a.href;
-          if (!href || seenLinks.has(href)) continue;
+          if (!href) continue;
 
           // Check if link looks like a product link
           const isProductLink =
@@ -240,15 +273,7 @@ export async function extractProducts(page: Page): Promise<ProductData[]> {
               const img = container.querySelector('img') as HTMLImageElement | null;
               const image = pickImg(img);
 
-              if (title && title.length > 2) {
-                seenLinks.add(href);
-                productData.push({
-                  title,
-                  price: price || undefined,
-                  image,
-                  link: href,
-                });
-              }
+              addProduct({ title, price: price || undefined, image, link: href });
             }
           }
         }

@@ -11,7 +11,57 @@ function inferProvider(url: string): string | undefined {
   if (value.includes('brightcove')) return 'brightcove';
   if (value.includes('jwplayer')) return 'jwplayer';
   if (value.includes('twitch.tv')) return 'twitch';
+  if (value.includes('adobe.io/v1/player/ccv')) return 'behance';
   return undefined;
+}
+
+function isProviderVideoUrl(url: string, provider?: string): boolean {
+  if (!provider) return false;
+
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.toLowerCase();
+    const search = parsed.search.toLowerCase();
+
+    if (provider === 'youtube') {
+      if (parsed.hostname.includes('youtu.be')) return pathname.split('/').filter(Boolean).length >= 1;
+      return pathname.includes('/watch') && search.includes('v=')
+        || pathname.includes('/embed/')
+        || pathname.includes('/shorts/');
+    }
+
+    if (provider === 'vimeo') {
+      return /\/\d+/.test(pathname) || pathname.includes('/video/');
+    }
+
+    if (provider === 'dailymotion') {
+      return pathname.includes('/video/') || pathname.includes('/embed/video/');
+    }
+
+    if (provider === 'loom') {
+      return pathname.includes('/share/');
+    }
+
+    if (provider === 'wistia') {
+      return pathname.includes('/medias/') || pathname.includes('/embed/');
+    }
+
+    if (provider === 'brightcove' || provider === 'jwplayer') {
+      return pathname.includes('/player/') || pathname.includes('/embed/');
+    }
+
+    if (provider === 'twitch') {
+      return pathname.includes('/videos/') || pathname.includes('/embed');
+    }
+
+    if (provider === 'behance') {
+      return pathname.includes('/v1/player/ccv');
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 export async function extractVideos(page: Page): Promise<VideoData[]> {
@@ -42,15 +92,77 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
       if (value.includes('brightcove')) return 'brightcove';
       if (value.includes('jwplayer')) return 'jwplayer';
       if (value.includes('twitch.tv')) return 'twitch';
+      if (value.includes('adobe.io/v1/player/ccv')) return 'behance';
       return undefined;
     };
 
     const normalizeUrl = (value: string) => value.trim();
+    const isProviderVideoUrl = (url: string, provider?: string): boolean => {
+      if (!provider) return false;
+
+      try {
+        const parsed = new URL(url, window.location.href);
+        const pathname = parsed.pathname.toLowerCase();
+        const search = parsed.search.toLowerCase();
+
+        if (provider === 'youtube') {
+          if (parsed.hostname.includes('youtu.be')) return pathname.split('/').filter(Boolean).length >= 1;
+          return pathname.includes('/watch') && search.includes('v=')
+            || pathname.includes('/embed/')
+            || pathname.includes('/shorts/');
+        }
+
+        if (provider === 'vimeo') {
+          return /\/\d+/.test(pathname) || pathname.includes('/video/');
+        }
+
+        if (provider === 'dailymotion') {
+          return pathname.includes('/video/') || pathname.includes('/embed/video/');
+        }
+
+        if (provider === 'loom') {
+          return pathname.includes('/share/');
+        }
+
+        if (provider === 'wistia') {
+          return pathname.includes('/medias/') || pathname.includes('/embed/');
+        }
+
+        if (provider === 'brightcove' || provider === 'jwplayer') {
+          return pathname.includes('/player/') || pathname.includes('/embed/');
+        }
+
+        if (provider === 'twitch') {
+          return pathname.includes('/videos/') || pathname.includes('/embed');
+        }
+
+        if (provider === 'behance') {
+          return pathname.includes('/v1/player/ccv');
+        }
+      } catch {
+        return false;
+      }
+
+      return false;
+    };
+
     const looksLikeEmbedPlayer = (value: string): boolean => {
       try {
         const parsed = new URL(value, window.location.href);
         const combined = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
-        if (embedPathPattern.test(combined)) return true;
+        if (
+          combined.includes('youtube.com/embed/') ||
+          combined.includes('player.vimeo.com/video/') ||
+          combined.includes('dailymotion.com/embed/video/') ||
+          combined.includes('wistia.com/embed/') ||
+          combined.includes('loom.com/embed/') ||
+          combined.includes('brightcove') ||
+          combined.includes('jwplayer') ||
+          combined.includes('adobe.io/v1/player/ccv')
+        ) {
+          return true;
+        }
+        if (embedPathPattern.test(combined) && inferProvider(value)) return true;
         return false;
       } catch {
         return false;
@@ -94,9 +206,10 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
       const hasVideoMime =
         mime.includes('video') || mime.includes('mpegurl') || mime.includes('dash+xml');
       const isDirectVideoFile = videoFilePattern.test(raw);
+      const hasProviderVideoUrl = isProviderVideoUrl(raw, provider);
       const isLikelyEmbeddedPlayer = !!data.isEmbedded && looksLikeEmbedPlayer(raw);
 
-      if (!isDirectVideoFile && !provider && !hasVideoMime && !isLikelyEmbeddedPlayer) {
+      if (!isDirectVideoFile && !hasVideoMime && !hasProviderVideoUrl && !isLikelyEmbeddedPlayer) {
         return;
       }
 
@@ -204,7 +317,7 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
       if (!href) return;
       const lowered = href.toLowerCase();
       const provider = inferProvider(href);
-      const isVideoAnchor = videoFilePattern.test(lowered) || !!provider;
+      const isVideoAnchor = videoFilePattern.test(lowered) || isProviderVideoUrl(href, provider);
       if (!isVideoAnchor) return;
 
       addVideo({
@@ -332,5 +445,20 @@ export async function extractVideos(page: Page): Promise<VideoData[]> {
       ...video,
       provider: video.provider || inferProvider(video.url),
     }))
+    .filter((video) => {
+      const provider = video.provider || inferProvider(video.url);
+      const mime = (video.mimeType || '').toLowerCase();
+      const hasVideoMime =
+        mime.includes('video') || mime.includes('mpegurl') || mime.includes('dash+xml');
+      const isDirectVideoFile = /\.(mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)(\?|#|$)/i.test(video.url);
+      const hasProviderVideoUrl = isProviderVideoUrl(video.url, provider);
+      const looksLikeEmbed =
+        video.isEmbedded &&
+        /(youtube\.com\/embed\/|player\.vimeo\.com\/video\/|dailymotion\.com\/embed\/video\/|wistia\.com\/embed\/|loom\.com\/embed\/|brightcove|jwplayer|adobe\.io\/v1\/player\/ccv)/i.test(
+          video.url
+        );
+
+      return isDirectVideoFile || hasVideoMime || hasProviderVideoUrl || looksLikeEmbed;
+    })
     .slice(0, 100);
 }

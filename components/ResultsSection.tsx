@@ -7,11 +7,14 @@ import { downloadCsv } from '@/lib/exportCsv';
 import FilterPanel from './FilterPanel';
 import ValidationPanel from './ValidationPanel';
 
+type ImageDownloadFormat = 'original' | 'jpg' | 'jpeg' | 'png' | 'webp' | 'gif' | 'svg' | 'avif';
+type VideoDownloadFormat = 'original' | 'mp4' | 'webm' | 'mov' | 'm4v' | 'm3u8' | 'mpd' | 'mkv' | 'ogv' | 'ts';
+
 interface ResultsSectionProps {
   results: ScrapeResult;
-  onDownloadAllImages?: () => void;
-  onDownloadAllVideos?: () => void;
-  onDownloadVideos?: (videoUrls: string[]) => void | Promise<void>;
+  onDownloadAllImages?: (downloadFormat?: ImageDownloadFormat) => void;
+  onDownloadAllVideos?: (downloadFormat?: VideoDownloadFormat) => void;
+  onDownloadVideos?: (videoUrls: string[], downloadFormat?: VideoDownloadFormat) => void | Promise<void>;
 }
 
 export default function ResultsSection({
@@ -25,6 +28,8 @@ export default function ResultsSection({
   const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set());
   const [selectedVideos, setSelectedVideos] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<string>('all');
+  const [imageDownloadFormat, setImageDownloadFormat] = useState<ImageDownloadFormat>('original');
+  const [videoDownloadFormat, setVideoDownloadFormat] = useState<VideoDownloadFormat>('original');
 
   const hasResults = Object.keys(results).some(key => {
     const value = results[key as keyof ScrapeResult];
@@ -150,7 +155,7 @@ export default function ResultsSection({
     const urls = getSelectedVideoUrls();
     if (urls.length === 0) return;
     if (onDownloadVideos) {
-      onDownloadVideos(urls);
+      onDownloadVideos(urls, videoDownloadFormat);
       return;
     }
     if (onDownloadAllVideos && displayResults.videos && urls.length === displayResults.videos.length) {
@@ -160,7 +165,7 @@ export default function ResultsSection({
 
   const downloadSingleVideo = (url: string) => {
     if (onDownloadVideos) {
-      onDownloadVideos([url]);
+      onDownloadVideos([url], videoDownloadFormat);
       return;
     }
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -423,6 +428,21 @@ export default function ResultsSection({
                 <span className="text-sm text-accent/50">({displayResults.images.length} items)</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs text-accent/60">Format</label>
+                <select
+                  value={imageDownloadFormat}
+                  onChange={(e) => setImageDownloadFormat(e.target.value as ImageDownloadFormat)}
+                  className="px-2 py-1 text-xs border border-border bg-background rounded"
+                >
+                  <option value="original">Original</option>
+                  <option value="jpg">JPG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="png">PNG</option>
+                  <option value="webp">WEBP</option>
+                  <option value="gif">GIF</option>
+                  <option value="svg">SVG</option>
+                  <option value="avif">AVIF</option>
+                </select>
                 <span className="text-sm text-accent/50">
                   {selectedImages.size} selected
                 </span>
@@ -447,7 +467,7 @@ export default function ResultsSection({
                   </button>
                 )}
                 <button
-                  onClick={onDownloadAllImages}
+                  onClick={() => onDownloadAllImages?.(imageDownloadFormat)}
                   className="px-3 py-1.5 text-xs bg-blue-500 text-white hover:bg-blue-600 rounded-lg transition-colors"
                 >
                   Download All
@@ -520,6 +540,23 @@ export default function ResultsSection({
                 <span className="text-sm text-accent/50">({displayResults.videos.length} items)</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs text-accent/60">Format</label>
+                <select
+                  value={videoDownloadFormat}
+                  onChange={(e) => setVideoDownloadFormat(e.target.value as VideoDownloadFormat)}
+                  className="px-2 py-1 text-xs border border-border bg-background rounded"
+                >
+                  <option value="original">Original</option>
+                  <option value="mp4">MP4</option>
+                  <option value="webm">WEBM</option>
+                  <option value="mov">MOV</option>
+                  <option value="m4v">M4V</option>
+                  <option value="m3u8">M3U8</option>
+                  <option value="mpd">MPD</option>
+                  <option value="mkv">MKV</option>
+                  <option value="ogv">OGV</option>
+                  <option value="ts">TS</option>
+                </select>
                 <span className="text-sm text-accent/50">
                   {selectedVideos.size} selected
                 </span>
@@ -552,7 +589,7 @@ export default function ResultsSection({
                   </button>
                 )}
                 <button
-                  onClick={onDownloadAllVideos}
+                  onClick={() => onDownloadAllVideos?.(videoDownloadFormat)}
                   className="px-3 py-1.5 text-xs bg-red-700 text-white hover:bg-red-800 rounded-lg transition-colors"
                 >
                   Download All
@@ -848,12 +885,9 @@ export default function ResultsSection({
                   Headings ({displayResults.text.headings.length})
                 </h4>
                 <ul className="space-y-1 list-disc list-inside text-sm">
-                  {displayResults.text.headings.slice(0, 20).map((heading, idx) => (
+                  {displayResults.text.headings.map((heading, idx) => (
                     <li key={idx}>{heading}</li>
                   ))}
-                  {displayResults.text.headings.length > 20 && (
-                    <li className="text-accent/50 italic list-none">+ {displayResults.text.headings.length - 20} more...</li>
-                  )}
                 </ul>
               </div>
             )}
@@ -863,13 +897,10 @@ export default function ResultsSection({
                 <h4 className="text-xs font-medium text-accent/50 uppercase tracking-wide mb-2">
                   Content ({displayResults.text.paragraphs.length} paragraphs)
                 </h4>
-                <div className="bg-hover/50 rounded-lg p-4 max-h-64 overflow-y-auto space-y-3 text-sm">
-                  {displayResults.text.paragraphs.slice(0, 10).map((para, idx) => (
+                <div className="bg-hover/50 rounded-lg p-4 max-h-[32rem] overflow-y-auto space-y-3 text-sm">
+                  {displayResults.text.paragraphs.map((para, idx) => (
                     <p key={idx}>{para}</p>
                   ))}
-                  {displayResults.text.paragraphs.length > 10 && (
-                    <p className="text-accent/50 italic">+ {displayResults.text.paragraphs.length - 10} more...</p>
-                  )}
                 </div>
               </div>
             )}

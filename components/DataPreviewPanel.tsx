@@ -120,14 +120,14 @@ export default function DataPreviewPanel({ results, onExport }: DataPreviewPanel
 
   return (
     <div className="border border-border rounded p-4 bg-hover/30">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-4">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
           <h3 className="text-sm text-accent/70">preview data</h3>
           <span className="text-xs text-accent/50">
             {selectedCount} of {previewData.length} selected
           </span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={handleSelectAll}
             className="px-3 py-1 text-xs border border-border hover:bg-hover rounded"
@@ -160,7 +160,7 @@ export default function DataPreviewPanel({ results, onExport }: DataPreviewPanel
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[920px] text-sm">
           <thead>
             <tr className="border-b border-border">
               <th className="text-left py-2 px-2">

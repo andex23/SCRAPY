@@ -1,6 +1,16 @@
 import { NextRequest } from 'next/server';
 import archiver from 'archiver';
 
+type VideoDownloadFormat = 'original' | 'mp4' | 'webm' | 'mov' | 'm4v' | 'm3u8' | 'mpd' | 'mkv' | 'ogv' | 'ts';
+
+function normalizeVideoFormat(value: unknown): VideoDownloadFormat {
+  const format = String(value || 'original').toLowerCase();
+  if (['mp4', 'webm', 'mov', 'm4v', 'm3u8', 'mpd', 'mkv', 'ogv', 'ts'].includes(format)) {
+    return format as VideoDownloadFormat;
+  }
+  return 'original';
+}
+
 function inferVideoExtension(url: URL, contentType?: string): string {
   const type = (contentType || '').toLowerCase();
   if (type.includes('application/vnd.apple.mpegurl') || type.includes('application/x-mpegurl')) return '.m3u8';
@@ -41,10 +51,16 @@ function isDownloadableVideoContent(contentType: string, finalUrl: URL): boolean
   return /\.(mp4|webm|mov|m4v|m3u8|mpd|ogv|mkv)(\?|#|$)/i.test(finalUrl.href);
 }
 
+function matchesVideoFormat(ext: string, requested: VideoDownloadFormat): boolean {
+  if (requested === 'original') return true;
+  const normalized = ext.replace(/^\./, '').toLowerCase();
+  return normalized === requested;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { videoUrls } = body;
+    const { videoUrls, downloadFormat } = body;
 
     if (!videoUrls || !Array.isArray(videoUrls) || videoUrls.length === 0) {
       return Response.json(
@@ -53,7 +69,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const requestedFormat = normalizeVideoFormat(downloadFormat);
     const files: Array<{ name: string; buffer: Buffer }> = [];
+    const fetchStatusCounts = new Map<number, number>();
+    let hadFormatFilteredMatch = false;
 
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
@@ -70,7 +89,10 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        if (!response.ok) continue;
+        if (!response.ok) {
+          fetchStatusCounts.set(response.status, (fetchStatusCounts.get(response.status) || 0) + 1);
+          continue;
+        }
 
         const finalUrl = new URL(response.url || videoUrl);
         const contentType = response.headers.get('content-type') || '';
@@ -78,8 +100,13 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const buffer = Buffer.from(await response.arrayBuffer());
         const inferredExt = inferVideoExtension(finalUrl, contentType);
+        if (!matchesVideoFormat(inferredExt, requestedFormat)) {
+          hadFormatFilteredMatch = true;
+          continue;
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer());
         const rawFilename = finalUrl.pathname.split('/').pop() || `video-${i + 1}${inferredExt}`;
         const hasExtension = /\.[a-z0-9]{2,5}$/i.test(rawFilename);
         const filename = `${String(i + 1).padStart(3, '0')}_${rawFilename}${hasExtension ? '' : inferredExt}`;
@@ -91,8 +118,29 @@ export async function POST(request: NextRequest) {
     }
 
     if (files.length === 0) {
+      const blockedCount = (fetchStatusCounts.get(401) || 0) + (fetchStatusCounts.get(403) || 0);
+      const rateLimitedCount = fetchStatusCounts.get(429) || 0;
+      const notFoundCount = fetchStatusCounts.get(404) || 0;
+
+      let formatHint =
+        requestedFormat === 'original'
+          ? 'No downloadable video files found for the selected links.'
+          : `No downloadable ${requestedFormat.toUpperCase()} video files found for the selected links.`;
+
+      if (blockedCount > 0) {
+        formatHint =
+          'The target site blocked video downloads (HTTP 401/403). Try downloading from the source page directly or provide auth cookies.';
+      } else if (rateLimitedCount > 0) {
+        formatHint = 'The target site is rate-limiting video downloads (HTTP 429). Please retry shortly.';
+      } else if (notFoundCount > 0) {
+        formatHint = 'Some video links are no longer available (HTTP 404). Try scraping again for fresh URLs.';
+      } else if (requestedFormat !== 'original' && hadFormatFilteredMatch) {
+        formatHint =
+          `No ${requestedFormat.toUpperCase()} files were available for the selected items. Try "Original" format.`;
+      }
+
       return Response.json(
-        { error: 'No downloadable video files found for the selected links.' },
+        { error: formatHint },
         { status: 400 }
       );
     }
