@@ -448,12 +448,12 @@ export default function ResultsSection({
                 <h3 className="text-lg font-medium">Images</h3>
                 <span className="text-sm text-accent/50">({displayResults.images.length} items)</span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
                 <label className="text-xs text-accent/60">Format</label>
                 <select
                   value={imageDownloadFormat}
                   onChange={(e) => setImageDownloadFormat(e.target.value as ImageDownloadFormat)}
-                  className="px-2 py-1 text-xs border border-border bg-background rounded"
+                  className="px-2 py-1 text-xs border border-border bg-background rounded min-w-0"
                 >
                   <option value="original">Original</option>
                   <option value="jpg">JPG</option>
@@ -479,22 +479,28 @@ export default function ResultsSection({
                 >
                   Deselect All
                 </button>
-                {selectedImages.size > 0 && (
-                  <button
-                    onClick={exportSelectedImages}
-                    className="px-3 py-1.5 text-xs bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded-lg transition-colors"
-                  >
-                    Export Metadata
-                  </button>
-                )}
-                {selectedImages.size > 0 && (
-                  <button
-                    onClick={downloadSelectedImages}
-                    className="px-3 py-1.5 text-xs bg-blue-500 text-white hover:bg-blue-600 rounded-lg transition-colors"
-                  >
-                    Download Selected
-                  </button>
-                )}
+                <button
+                  onClick={exportSelectedImages}
+                  disabled={selectedImages.size === 0}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    selectedImages.size === 0
+                      ? 'bg-hover text-accent/40 cursor-not-allowed'
+                      : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                  }`}
+                >
+                  Export Metadata
+                </button>
+                <button
+                  onClick={downloadSelectedImages}
+                  disabled={selectedImages.size === 0}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    selectedImages.size === 0
+                      ? 'bg-hover text-accent/40 cursor-not-allowed'
+                      : 'bg-blue-500 text-white hover:bg-blue-600'
+                  }`}
+                >
+                  Download Selected
+                </button>
                 <button
                   onClick={() => onDownloadAllImages?.(imageDownloadFormat)}
                   className="px-3 py-1.5 text-xs bg-blue-700 text-white hover:bg-blue-800 rounded-lg transition-colors"
@@ -572,12 +578,12 @@ export default function ResultsSection({
                 <h3 className="text-lg font-medium">Videos</h3>
                 <span className="text-sm text-accent/50">({displayResults.videos.length} items)</span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
                 <label className="text-xs text-accent/60">Format</label>
                 <select
                   value={videoDownloadFormat}
                   onChange={(e) => setVideoDownloadFormat(e.target.value as VideoDownloadFormat)}
-                  className="px-2 py-1 text-xs border border-border bg-background rounded"
+                  className="px-2 py-1 text-xs border border-border bg-background rounded min-w-0"
                 >
                   <option value="original">Original</option>
                   <option value="mp4">MP4</option>
@@ -605,22 +611,28 @@ export default function ResultsSection({
                 >
                   Deselect All
                 </button>
-                {selectedVideos.size > 0 && (
-                  <button
-                    onClick={exportSelectedVideos}
-                    className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg transition-colors"
-                  >
-                    Export Metadata
-                  </button>
-                )}
-                {selectedVideos.size > 0 && (
-                  <button
-                    onClick={downloadSelectedVideos}
-                    className="px-3 py-1.5 text-xs bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors"
-                  >
-                    Download Selected
-                  </button>
-                )}
+                <button
+                  onClick={exportSelectedVideos}
+                  disabled={selectedVideos.size === 0}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    selectedVideos.size === 0
+                      ? 'bg-hover text-accent/40 cursor-not-allowed'
+                      : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                  }`}
+                >
+                  Export Metadata
+                </button>
+                <button
+                  onClick={downloadSelectedVideos}
+                  disabled={selectedVideos.size === 0}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    selectedVideos.size === 0
+                      ? 'bg-hover text-accent/40 cursor-not-allowed'
+                      : 'bg-red-500 text-white hover:bg-red-600'
+                  }`}
+                >
+                  Download Selected
+                </button>
                 <button
                   onClick={() => onDownloadAllVideos?.(videoDownloadFormat)}
                   className="px-3 py-1.5 text-xs bg-red-700 text-white hover:bg-red-800 rounded-lg transition-colors"
