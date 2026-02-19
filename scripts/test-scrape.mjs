@@ -14,7 +14,28 @@ if (!url) {
   process.exit(1);
 }
 
-const API_URL = process.env.API_URL || 'http://localhost:3000';
+const ENV_API_URL = process.env.API_URL || process.env.SCRAPE_API_URL;
+const API_CANDIDATES = ENV_API_URL
+  ? [ENV_API_URL]
+  : [
+      'http://127.0.0.1:3001',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://localhost:3000',
+    ];
+
+async function requestScrape(apiBase) {
+  return fetch(`${apiBase}/api/scrape`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      url,
+      modules,
+    }),
+  });
+}
 
 async function testScrape() {
   console.log(`\n🧪 Testing scrape: ${url}`);
@@ -22,21 +43,30 @@ async function testScrape() {
 
   try {
     const startTime = Date.now();
-    const response = await fetch(`${API_URL}/api/scrape`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url,
-        modules,
-      }),
-    });
+    let response = null;
+    let apiBase = '';
+    let lastNetworkError = null;
+
+    for (const candidate of API_CANDIDATES) {
+      try {
+        const candidateResponse = await requestScrape(candidate);
+        response = candidateResponse;
+        apiBase = candidate;
+        break;
+      } catch (error) {
+        lastNetworkError = error;
+      }
+    }
+
+    if (!response) {
+      throw lastNetworkError || new Error('No reachable local scrape API endpoint found');
+    }
 
     const duration = Date.now() - startTime;
     const data = await response.json();
 
     if (!response.ok) {
+      console.log(`🔌 API: ${apiBase}`);
       console.error('❌ Error:', data.error || response.statusText);
       process.exit(1);
     }
@@ -46,6 +76,7 @@ async function testScrape() {
       process.exit(1);
     }
 
+    console.log(`🔌 API: ${apiBase}`);
     console.log(`✅ Success (${duration}ms)\n`);
 
     const results = data.data || {};
@@ -98,7 +129,7 @@ async function testScrape() {
     console.log('\n');
   } catch (error) {
     console.error('❌ Network error:', error.message);
-    console.error('\nMake sure the dev server is running: npm run dev');
+    console.error('\nMake sure the dev server is running (port 3001 or 3000), or set API_URL.');
     process.exit(1);
   }
 }
