@@ -14,6 +14,7 @@ interface ResultsSectionProps {
   results: ScrapeResult;
   onDownloadAllImages?: (downloadFormat?: ImageDownloadFormat) => void;
   onDownloadAllVideos?: (downloadFormat?: VideoDownloadFormat) => void;
+  onDownloadImages?: (imageUrls: string[], downloadFormat?: ImageDownloadFormat) => void | Promise<void>;
   onDownloadVideos?: (videoUrls: string[], downloadFormat?: VideoDownloadFormat) => void | Promise<void>;
 }
 
@@ -21,6 +22,7 @@ export default function ResultsSection({
   results,
   onDownloadAllImages,
   onDownloadAllVideos,
+  onDownloadImages,
   onDownloadVideos,
 }: ResultsSectionProps) {
   const [filteredResults, setFilteredResults] = useState<ScrapeResult>(results);
@@ -150,6 +152,25 @@ export default function ResultsSection({
           .filter((_, i) => selectedVideos.has(i))
           .map((video) => video.url)
       : [];
+
+  const getSelectedImageUrls = () =>
+    displayResults.images
+      ? displayResults.images
+          .filter((_, i) => selectedImages.has(i))
+          .map((image) => image.url)
+      : [];
+
+  const downloadSelectedImages = () => {
+    const urls = getSelectedImageUrls();
+    if (urls.length === 0) return;
+    if (onDownloadImages) {
+      onDownloadImages(urls, imageDownloadFormat);
+      return;
+    }
+    if (onDownloadAllImages && displayResults.images && urls.length === displayResults.images.length) {
+      onDownloadAllImages(imageDownloadFormat);
+    }
+  };
 
   const downloadSelectedVideos = () => {
     const urls = getSelectedVideoUrls();
@@ -463,17 +484,29 @@ export default function ResultsSection({
                     onClick={exportSelectedImages}
                     className="px-3 py-1.5 text-xs bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded-lg transition-colors"
                   >
-                    Export Selected
+                    Export Metadata
+                  </button>
+                )}
+                {selectedImages.size > 0 && (
+                  <button
+                    onClick={downloadSelectedImages}
+                    className="px-3 py-1.5 text-xs bg-blue-500 text-white hover:bg-blue-600 rounded-lg transition-colors"
+                  >
+                    Download Selected
                   </button>
                 )}
                 <button
                   onClick={() => onDownloadAllImages?.(imageDownloadFormat)}
-                  className="px-3 py-1.5 text-xs bg-blue-500 text-white hover:bg-blue-600 rounded-lg transition-colors"
+                  className="px-3 py-1.5 text-xs bg-blue-700 text-white hover:bg-blue-800 rounded-lg transition-colors"
                 >
                   Download All
                 </button>
               </div>
             </div>
+          </div>
+
+          <div className="px-6 py-2 border-b border-border text-xs text-accent/60">
+            Download saves image files. Export saves metadata JSON.
           </div>
 
           <div className="p-4">

@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { scrapeWithModules } from '@/lib/scraper';
-import { AuthConfig } from '@/types';
+import { AuthConfig, ScrapeResult } from '@/types';
+import {
+  isLikelyTransientScrapeError,
+  scrapeCircuitBreaker,
+  scrapeQueue,
+  withRetry,
+} from '@/lib/reliability';
+import { adaptSiteConfig } from '@/lib/site-adapters';
+import { discoverSitemapUrls } from '@/lib/sitemap';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -47,10 +55,32 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function mapScrapeErrorToResponse(error: unknown): { status: number; message: string } {
+function mapScrapeErrorToResponse(error: unknown): {
+  status: number;
+  message: string;
+  retryAfterSeconds?: number;
+} {
   const message = toErrorMessage(error);
   const fallbackStatusMatch = message.match(/\((\d{3})\)/);
   const fallbackStatusCode = fallbackStatusMatch ? Number(fallbackStatusMatch[1]) : undefined;
+
+  if (message.startsWith('SCRAPER_QUEUE_TIMEOUT:')) {
+    return {
+      status: 503,
+      message: 'Scraper is currently busy. Please retry in a moment.',
+      retryAfterSeconds: 15,
+    };
+  }
+
+  if (message.startsWith('SCRAPER_CIRCUIT_OPEN:')) {
+    const retryMatch = message.match(/retry_after=(\d+)/i);
+    const retryAfterSeconds = retryMatch ? Number(retryMatch[1]) : 60;
+    return {
+      status: 429,
+      message: `Temporary pause for this site due to repeated failures. Retry in ${retryAfterSeconds}s.`,
+      retryAfterSeconds,
+    };
+  }
 
   if (message.startsWith('SCRAPER_BROWSER_MISSING:')) {
     return {
@@ -124,15 +154,54 @@ function mapScrapeErrorToResponse(error: unknown): { status: number; message: st
     };
   }
 
+  if (
+    /access denied|forbidden|captcha|cloudflare|cf-ray|bot detection|verify you are human|attention required/i.test(
+      message
+    )
+  ) {
+    return {
+      status: 403,
+      message:
+        'The target site challenged or blocked automated access. Try authorized cookies/headers for permitted access, or use that site’s official API/feed.',
+    };
+  }
+
   return {
     status: 500,
     message: 'Failed to scrape website. Please retry in a moment.',
   };
 }
 
+async function applySitemapFallback(
+  data: ScrapeResult,
+  pageUrl: string,
+  modules: string[],
+  crawlDepth: number,
+  enabled: boolean
+): Promise<boolean> {
+  if (!enabled) return false;
+  if (!modules.includes('crawl')) return false;
+  if (data.crawl && data.crawl.length > 0) return false;
+
+  const sitemapUrls = await discoverSitemapUrls(pageUrl, crawlDepth > 1 ? 500 : 300);
+  if (sitemapUrls.length === 0) return false;
+
+  data.crawl = sitemapUrls;
+  return true;
+}
+
 export async function POST(request: NextRequest) {
+  let targetHost = '';
+
   try {
-    const body = await request.json();
+    const body = await request.json() as {
+      url?: unknown;
+      modules?: unknown;
+      authConfig?: AuthConfig;
+      crawlDepth?: unknown;
+      customSelectors?: Record<string, unknown>;
+      bulkUrls?: unknown;
+    };
     const { url, modules, authConfig, crawlDepth, customSelectors } = body;
 
     if (!url || typeof url !== 'string') {
@@ -142,7 +211,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!modules || !Array.isArray(modules) || modules.length === 0) {
+    if (!modules || !Array.isArray(modules) || modules.length === 0 || modules.some((module) => typeof module !== 'string')) {
       return NextResponse.json(
         { success: false, error: 'At least one module is required' },
         { status: 400 }
@@ -164,8 +233,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const adapted = adaptSiteConfig(finalUrl, modules as string[]);
+    finalUrl = adapted.normalizedUrl;
+    const adaptedModules = adapted.modules;
+    targetHost = new URL(finalUrl).hostname.toLowerCase();
+
+    const gate = scrapeCircuitBreaker.beforeRequest(targetHost);
+    if (!gate.allowed) {
+      const retryAfterSeconds = Math.max(1, Math.ceil(gate.retryAfterMs / 1000));
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Temporary pause for this site due to repeated failures. Retry in ${retryAfterSeconds}s.`,
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(retryAfterSeconds),
+          },
+        }
+      );
+    }
+
+    const depth = crawlDepth && typeof crawlDepth === 'number' && crawlDepth > 0 ? crawlDepth : 1;
+    let data: ScrapeResult | null = null;
+    let backend: 'python' | 'typescript' = 'typescript';
+    let retriesUsed = 1;
+    let sitemapFallbackUsed = false;
+
     // Route to Python backend if needed
-    if (shouldUsePythonBackend(body)) {
+    if (shouldUsePythonBackend({ ...body, modules: adaptedModules })) {
       try {
         const pythonResponse = await fetch(`${PYTHON_API_URL}/api/scrape`, {
           method: 'POST',
@@ -174,16 +271,19 @@ export async function POST(request: NextRequest) {
           },
           body: JSON.stringify({
             url: finalUrl,
-            modules,
+            modules: adaptedModules,
             authConfig,
-            crawlDepth,
+            crawlDepth: depth,
             customSelectors,
           }),
         });
 
         if (pythonResponse.ok) {
           const pythonData = await pythonResponse.json();
-          return NextResponse.json(pythonData);
+          if (pythonData?.success && pythonData?.data) {
+            data = pythonData.data as ScrapeResult;
+            backend = 'python';
+          }
         } else {
           // Fallback to TypeScript if Python fails
           console.warn('Python backend failed, falling back to TypeScript');
@@ -194,30 +294,80 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Use TypeScript scraper (existing implementation)
-    const auth: AuthConfig | undefined = authConfig ? {
-      apiKey: authConfig.apiKey,
-      apiKeyHeader: authConfig.apiKeyHeader,
-      cookies: authConfig.cookies,
-      headers: authConfig.headers,
-    } : undefined;
+    if (!data) {
+      // Use TypeScript scraper with queue and retries
+      const auth: AuthConfig | undefined = authConfig
+        ? {
+            apiKey: authConfig.apiKey,
+            apiKeyHeader: authConfig.apiKeyHeader,
+            cookies: authConfig.cookies,
+            headers: authConfig.headers,
+            proxy: authConfig.proxy,
+            locale: authConfig.locale,
+            timezone: authConfig.timezone,
+          }
+        : undefined;
 
-    const depth = crawlDepth && typeof crawlDepth === 'number' && crawlDepth > 0 ? crawlDepth : 1;
-    const data = await scrapeWithModules(finalUrl, modules, auth, depth);
+      const queued = await scrapeQueue.enqueue(() =>
+        withRetry(
+          () => scrapeWithModules(finalUrl, adaptedModules, auth, depth),
+          {
+            maxAttempts: 3,
+            baseDelayMs: 900,
+            maxDelayMs: 7000,
+            shouldRetry: (error) => isLikelyTransientScrapeError(error),
+          }
+        ),
+        60000
+      );
+
+      data = queued.value;
+      retriesUsed = queued.attempts;
+      backend = 'typescript';
+    }
+
+    sitemapFallbackUsed = await applySitemapFallback(
+      data,
+      finalUrl,
+      adaptedModules,
+      depth,
+      adapted.allowSitemapFallback
+    );
+
+    scrapeCircuitBreaker.recordSuccess(targetHost);
 
     return NextResponse.json({
       success: true,
       data,
+      meta: {
+        adapter: adapted.adapterId,
+        backend,
+        retriesUsed,
+        sitemapFallbackUsed,
+        queue: scrapeQueue.getSnapshot(),
+      },
     });
   } catch (error) {
     console.error('Scraping error:', error);
+    if (targetHost) {
+      scrapeCircuitBreaker.recordFailure(targetHost, error);
+    }
+
     const mapped = mapScrapeErrorToResponse(error);
+    const headers: Record<string, string> = {};
+    if (mapped.retryAfterSeconds) {
+      headers['Retry-After'] = String(mapped.retryAfterSeconds);
+    }
+
     return NextResponse.json(
       {
         success: false,
         error: mapped.message,
       },
-      { status: mapped.status }
+      {
+        status: mapped.status,
+        headers,
+      }
     );
   }
 }

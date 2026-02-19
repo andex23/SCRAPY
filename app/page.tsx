@@ -253,6 +253,13 @@ export default function Home() {
     await downloadMediaZip('/api/download', 'imageUrls', imageUrls, 'scraped-images', 'images', downloadFormat);
   };
 
+  const handleDownloadImages = async (
+    imageUrls: string[],
+    downloadFormat: ImageDownloadFormat = 'original'
+  ) => {
+    await downloadMediaZip('/api/download', 'imageUrls', imageUrls, 'scraped-images', 'images', downloadFormat);
+  };
+
   const handleDownloadAllVideos = async (downloadFormat: VideoDownloadFormat = 'original') => {
     const videoUrls = results.videos?.map((video) => video.url) || [];
     await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos', downloadFormat);
@@ -644,6 +651,16 @@ export default function Home() {
                         downloadFormat || 'original'
                       )
                     }
+                    onDownloadImages={(imageUrls, downloadFormat) =>
+                      downloadMediaZip(
+                        '/api/download',
+                        'imageUrls',
+                        imageUrls,
+                        'scraped-images',
+                        'images',
+                        downloadFormat || 'original'
+                      )
+                    }
                     onDownloadAllVideos={(downloadFormat) =>
                       downloadMediaZip(
                         '/api/download/videos',
@@ -723,6 +740,7 @@ export default function Home() {
               <ResultsSection
                 results={results}
                 onDownloadAllImages={handleDownloadAllImages}
+                onDownloadImages={handleDownloadImages}
                 onDownloadAllVideos={handleDownloadAllVideos}
                 onDownloadVideos={handleDownloadVideos}
               />
