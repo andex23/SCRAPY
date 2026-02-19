@@ -265,6 +265,43 @@ export default function Home() {
     await downloadMediaZip('/api/download/videos', 'videoUrls', videoUrls, 'scraped-videos', 'videos', downloadFormat);
   };
 
+  const matchesRequestedFormat = (mediaUrl: string, requestedFormat: string) => {
+    if (requestedFormat === 'original') return true;
+
+    try {
+      const pathname = new URL(mediaUrl).pathname.toLowerCase();
+      const match = pathname.match(/\.([a-z0-9]{2,5})$/i);
+      const ext = match?.[1]?.toLowerCase();
+      if (!ext) return false;
+      if (requestedFormat === 'jpg' || requestedFormat === 'jpeg') {
+        return ext === 'jpg' || ext === 'jpeg';
+      }
+      return ext === requestedFormat.toLowerCase();
+    } catch {
+      return false;
+    }
+  };
+
+  const openMediaUrlsDirectly = (
+    urls: string[],
+    filenamePrefix: string,
+    requestedFormat: string
+  ) => {
+    const candidates = urls.filter((item) => matchesRequestedFormat(item, requestedFormat));
+    for (let index = 0; index < candidates.length; index++) {
+      const mediaUrl = candidates[index];
+      const a = document.createElement('a');
+      a.href = mediaUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.download = `${filenamePrefix}-${index + 1}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    return candidates.length;
+  };
+
   const downloadMediaZip = async (
     endpoint: string,
     payloadKey: 'imageUrls' | 'videoUrls',
@@ -281,6 +318,7 @@ export default function Home() {
     setDownloadStatusMessage(`Collecting ${mediaLabel} files (${formatLabel})...`);
 
     let hasError = false;
+    let usedDirectFallback = false;
 
     try {
       const response = await fetch(endpoint, {
@@ -325,14 +363,36 @@ export default function Home() {
     } catch (err) {
       hasError = true;
       const message = err instanceof Error ? err.message : `Failed to download ${mediaLabel}`;
-      setDownloadStatusTitle('Download failed');
-      setDownloadStatusMessage(message);
-      alert(message);
+
+      const blockedBySourceSite = /blocked .*downloads|No downloadable .*found/i.test(message);
+      if (blockedBySourceSite) {
+        const openedCount = openMediaUrlsDirectly(urls, filenamePrefix, downloadFormat);
+        if (openedCount > 0) {
+          usedDirectFallback = true;
+          hasError = false;
+          setDownloadStatusTitle('Opened source links');
+          setDownloadStatusMessage(
+            `Server ZIP was blocked by the source site. Opened ${openedCount} file link${openedCount > 1 ? 's' : ''} directly in your browser.`
+          );
+          alert(
+            `${message}\n\nServer-side ZIP is blocked for this source. Opened ${openedCount} direct link${openedCount > 1 ? 's' : ''} instead.`
+          );
+        } else {
+          setDownloadStatusTitle('Download failed');
+          setDownloadStatusMessage(message);
+          alert(message);
+        }
+      } else {
+        setDownloadStatusTitle('Download failed');
+        setDownloadStatusMessage(message);
+        alert(message);
+      }
+
       console.error('Download error:', err);
     } finally {
       window.setTimeout(() => {
         setIsDownloading(false);
-      }, hasError ? 2200 : 1400);
+      }, hasError ? 2200 : usedDirectFallback ? 2400 : 1400);
     }
   };
 
